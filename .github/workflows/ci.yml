@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install web dependencies
+        run: npm --prefix src/web install
+      - name: Run backend unit tests
+        run: npm test
+      - name: Run backend API integration tests
+        run: npm run test:integration:api
+      - name: Run frontend tests
+        run: npm run web:test
+      - name: Build frontend
+        run: npm run web:build
+      - name: Create release package
+        shell: pwsh
+        run: |
+          pwsh -File infra/scripts/package-release.ps1
+      - name: Validate release package integrity
+        shell: pwsh
+        run: |
+          $pkg = (Get-ChildItem artifacts/secret_server_release_*.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          if (-not $pkg) { throw 'Release package not found for validation.' }
+          $checksum = "$pkg.sha256"
+          if (-not (Test-Path $checksum)) { throw "Detached checksum file missing: $checksum" }
+          pwsh -File infra/scripts/deploy-from-package.ps1 -PackagePath $pkg -ChecksumFile $checksum -ValidateOnly
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: secret-server-release
+          path: |
+            artifacts/secret_server_release_*.zip
+            artifacts/secret_server_release_*.zip.sha256
+
+  integration-sql:
+    runs-on: ubuntu-latest
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          SA_PASSWORD: "YourStrong!Passw0rd"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install PowerShell
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y powershell
+      - name: Install sqlcmd
+        run: |
+          sudo ACCEPT_EULA=Y apt-get install -y curl gnupg apt-transport-https
+          curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+          curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          echo "/opt/mssql-tools18/bin" >> $GITHUB_PATH
+      - name: Create database
+        run: |
+          /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -C -Q "IF DB_ID('secret_server') IS NULL CREATE DATABASE secret_server;"
+      - name: Apply migrations
+        env:
+          SECRET_SERVER_SQL_SERVER: localhost
+          SECRET_SERVER_SQL_DATABASE: secret_server
+          SECRET_SERVER_SQL_USERNAME: sa
+          SECRET_SERVER_SQL_PASSWORD: YourStrong!Passw0rd
+          SECRET_SERVER_SQLCMD_PATH: /opt/mssql-tools18/bin/sqlcmd
+          SECRET_SERVER_SQL_TRUST_SERVER_CERTIFICATE: "true"
+        run: |
+          pwsh -File infra/scripts/apply-migrations.ps1 -TrustServerCertificate
+      - name: Re-apply migrations (idempotence)
+        env:
+          SECRET_SERVER_SQL_SERVER: localhost
+          SECRET_SERVER_SQL_DATABASE: secret_server
+          SECRET_SERVER_SQL_USERNAME: sa
+          SECRET_SERVER_SQL_PASSWORD: YourStrong!Passw0rd
+          SECRET_SERVER_SQLCMD_PATH: /opt/mssql-tools18/bin/sqlcmd
+          SECRET_SERVER_SQL_TRUST_SERVER_CERTIFICATE: "true"
+        run: |
+          pwsh -File infra/scripts/apply-migrations.ps1 -TrustServerCertificate
+      - name: Run SQL integration tests
+        env:
+          SECRET_SERVER_SQL_SERVER: localhost
+          SECRET_SERVER_SQL_DATABASE: secret_server
+          SECRET_SERVER_SQL_USERNAME: sa
+          SECRET_SERVER_SQL_PASSWORD: YourStrong!Passw0rd
+          SECRET_SERVER_SQLCMD_PATH: /opt/mssql-tools18/bin/sqlcmd
+          SECRET_SERVER_SQL_TRUST_SERVER_CERTIFICATE: "true"
+        run: |
+          npm run test:integration:sql
+      - name: Run SQL API integration tests
+        env:
+          SECRET_SERVER_SQL_SERVER: localhost
+          SECRET_SERVER_SQL_DATABASE: secret_server
+          SECRET_SERVER_SQL_USERNAME: sa
+          SECRET_SERVER_SQL_PASSWORD: YourStrong!Passw0rd
+          SECRET_SERVER_SQLCMD_PATH: /opt/mssql-tools18/bin/sqlcmd
+          SECRET_SERVER_SQL_TRUST_SERVER_CERTIFICATE: "true"
+        run: |
+          npm run test:integration:api:sql
+

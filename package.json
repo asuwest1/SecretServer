@@ -1,0 +1,21 @@
+{
+    "name":  "secret-server",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "Secret Server MVP scaffold",
+    "type":  "module",
+    "scripts":  {
+                    "start":  "node src/api/server.js",
+                    "test":  "node tests/run-tests.js",
+                    "test:integration:api":  "node tests/integration-api.js",
+                    "test:integration:ldap":  "node tests/integration-ldap.js",
+                    "test:integration:sql":  "node tests/integration-sql.js",
+                    "test:integration:api:sql":  "node tests/integration-api-sql.js",
+                    "migrate":  "powershell -NoProfile -File infra/scripts/apply-migrations.ps1",
+                    "web:dev":  "npm --prefix src/web run dev",
+                    "web:test":  "npm --prefix src/web run test",
+                    "web:build":  "npm --prefix src/web run build",
+                    "web:preview":  "npm --prefix src/web run preview",
+                    "test:perf:api":  "node tests/perf-api.js"
+                }
+}

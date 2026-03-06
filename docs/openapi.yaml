@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: Secret Server API
+  version: v1
+servers:
+  - url: /api/v1
+paths:
+  /auth/login:
+    post:
+      summary: Username/password login
+  /auth/mfa:
+    post:
+      summary: Complete MFA challenge
+  /auth/refresh:
+    post:
+      summary: Rotate refresh token and issue new access token
+  /auth/logout:
+    post:
+      summary: Revoke refresh token session
+  /auth/logout-all:
+    post:
+      summary: Revoke all refresh sessions for current or target user
+  /auth/bootstrap-super-admin:
+    post:
+      summary: Bootstrap initial Super Admin user (first-run only)
+  /users:
+    get:
+      summary: List users (Super Admin)
+    post:
+      summary: Create user (Super Admin)
+  /users/{id}:
+    delete:
+      summary: Deactivate user (Super Admin)
+  /users/{id}/api-tokens:
+    post:
+      summary: Create API token for self/Super Admin
+  /users/{id}/mfa/setup:
+    post:
+      summary: Begin TOTP MFA setup
+  /users/{id}/mfa/verify:
+    post:
+      summary: Verify TOTP code and enable MFA
+  /roles:
+    get:
+      summary: List roles (Super Admin)
+    post:
+      summary: Create role (Super Admin)
+  /roles/{id}/members:
+    post:
+      summary: Assign role to user (Super Admin)
+  /folders:
+    get:
+      summary: List folders
+    post:
+      summary: Create folder
+  /folders/{id}/acl:
+    get:
+      summary: Get folder ACL
+    put:
+      summary: Replace folder ACL
+  /secrets:
+    get:
+      summary: Search secrets
+    post:
+      summary: Create secret
+  /secrets/{id}:
+    put:
+      summary: Update secret
+    delete:
+      summary: Soft-delete secret
+  /secrets/{id}/value:
+    get:
+      summary: Reveal secret value
+  /secrets/{id}/restore:
+    post:
+      summary: Restore soft-deleted secret
+  /secrets/{id}/versions:
+    get:
+      summary: List secret versions
+  /secrets/{id}/acl:
+    get:
+      summary: Get secret ACL
+    put:
+      summary: Replace secret ACL
+  /audit:
+    get:
+      summary: Query audit log by time range
+  /audit/export:
+    get:
+      summary: Export audit log in json/csv
+  /audit/verify:
+    get:
+      summary: Verify audit tamper-evident hash chain

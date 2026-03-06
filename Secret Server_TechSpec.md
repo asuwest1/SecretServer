@@ -121,9 +121,9 @@ This Technical Specification translates the Secret Server PRD into implementable
 | Process | User Account | Privileges |
 |---|---|---|
 | Nginx / IIS | `www-data` / `IIS_IUSRS` | Read config, bind port 443 |
-| Application Server | `Secret Server-app` (dedicated service account) | Read key file, read/write DB |
+| Application Server | `secret-server-app` (dedicated service account) | Read key file, read/write DB |
 | Database (SQL Server / PG) | `mssql` / `postgres` | Own DB files only |
-| Backup Agent | `Secret Server-backup` | Read DB + key file; write backup volume |
+| Backup Agent | `secret_server_backup` | Read DB + key file; write backup volume |
 
 ---
 
@@ -328,18 +328,18 @@ CREATE INDEX idx_audit_resource  ON audit_log(resource, resource_id);
 
 ```sql
 -- Application runtime user
-CREATE ROLE Secret Server_app LOGIN PASSWORD '...';
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO Secret Server_app;
-REVOKE DELETE, UPDATE ON audit_log FROM Secret Server_app;  -- audit_log is append-only
+CREATE ROLE secret_server_app LOGIN PASSWORD '...';
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO secret_server_app;
+REVOKE DELETE, UPDATE ON audit_log FROM secret_server_app;  -- audit_log is append-only
 
 -- Backup/read-only user
-CREATE ROLE Secret Server_backup LOGIN PASSWORD '...';
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO Secret Server_backup;
+CREATE ROLE secret_server_backup LOGIN PASSWORD '...';
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO secret_server_backup;
 ```
 
 ### 4.3 Full-Text Search
 
-PostgreSQL `tsvector` column on `secrets` covering `name`, `username`, `url`, and `tags`. Notes are **excluded** from search index (they may contain sensitive context). Search queries are scoped by the effective permission set of the requesting user using a CTE-based permission check before the text match.
+Search queries are scoped by the effective permission set of the requesting user using a CTE-based permission check before any text matching. Metadata search uses a PostgreSQL `tsvector` over `name`, `username`, `url`, and `tags`. To align with PRD FR-SEARCH-01, notes are also searchable: after ACL scoping, the application decrypts `notes_enc` for permitted rows only and applies a case-insensitive text match in-memory before returning results.
 
 ---
 
@@ -373,7 +373,7 @@ Secret Value
 **Selected strategy: Local key file** (see PRD §13, Decision #3). The key file is stored on a volume separate from the database, with permissions `chmod 400`. HashiCorp Vault support is planned for v2.0.
 
 Key file location options (in priority order):
-1. **Path specified in `Secret Server_KEY_FILE` environment variable** *(recommended — selected for v1.0)*
+1. **Path specified in `SECRET_SERVER_KEY_FILE` environment variable** *(recommended — selected for v1.0)*
 2. OS-level secrets manager (Windows DPAPI / Linux kernel keyring) via optional plugin *(v2.0)*
 3. `appsettings.json` → `Encryption:KeyFilePath` (not recommended for production)
 
@@ -559,8 +559,16 @@ permitted_secrets AS (
 SELECT s.id, s.name, s.secret_type, s.username, s.url, s.tags, s.updated_at
 FROM secrets s
 JOIN permitted_secrets ps ON ps.id = s.id
-WHERE to_tsvector('english', s.name || ' ' || COALESCE(s.username,'') || ' ' || COALESCE(s.url,''))
+WHERE to_tsvector(
+        'english',
+        s.name || ' ' ||
+        COALESCE(s.username,'') || ' ' ||
+        COALESCE(s.url,'') || ' ' ||
+        COALESCE(array_to_string(s.tags, ' '), '')
+      )
       @@ plainto_tsquery('english', @query);
+-- Notes search is applied in application code after ACL scoping by decrypting notes_enc
+-- for permitted rows only and matching the query text.
 ```
 
 ---
@@ -808,15 +816,15 @@ When syslog forwarding is enabled (`Syslog:Enabled = true`):
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Database=Secret Server;Username=Secret Server_app;Password=..."
+    "DefaultConnection": "Host=localhost;Database=secret_server;Username=secret_server_app;Password=..."
   },
   "Encryption": {
-    "KeyFilePath": "/etc/Secret Server/master.key",
+    "KeyFilePath": "/etc/secret-server/master.key",
     "KeySource": "file"
   },
   "Auth": {
     "Mode": "local",
-    "JwtSigningKeyPath": "/etc/Secret Server/jwt.key",
+    "JwtSigningKeyPath": "/etc/secret-server/jwt.key",
     "AccessTokenLifetimeMinutes": 15,
     "RefreshTokenLifetimeHours": 8,
     "LockoutThreshold": 5,
@@ -825,7 +833,7 @@ When syslog forwarding is enabled (`Syslog:Enabled = true`):
     "LdapPort": 636,
     "LdapBaseDn": "",
     "LdapServiceAccountDn": "",
-    "LdapServiceAccountPasswordEnv": "Secret Server_LDAP_PASSWORD"
+    "LdapServiceAccountPasswordEnv": "SECRET_SERVER_LDAP_PASSWORD"
   },
   "Session": {
     "IdleTimeoutMinutes": 15,
@@ -850,7 +858,7 @@ When syslog forwarding is enabled (`Syslog:Enabled = true`):
   "Backup": {
     "Enabled": true,
     "CronSchedule": "0 2 * * *",
-    "DestinationPath": "/var/backup/Secret Server",
+    "DestinationPath": "/var/backup/secret-server",
     "RetentionDays": 30
   },
   "Logging": {
@@ -863,10 +871,10 @@ When syslog forwarding is enabled (`Syslog:Enabled = true`):
 
 | Variable | Purpose |
 |---|---|
-| `Secret Server_KEY_FILE` | Path to MEK key file |
-| `Secret Server_DB_PASSWORD` | Database password |
-| `Secret Server_LDAP_PASSWORD` | LDAP service account password |
-| `Secret Server_JWT_KEY_FILE` | Path to JWT signing key |
+| `SECRET_SERVER_KEY_FILE` | Path to MEK key file |
+| `SECRET_SERVER_DB_PASSWORD` | Database password |
+| `SECRET_SERVER_LDAP_PASSWORD` | LDAP service account password |
+| `SECRET_SERVER_JWT_KEY_FILE` | Path to JWT signing key |
 | `ASPNETCORE_ENVIRONMENT` | `Production` / `Development` |
 
 ---
@@ -880,12 +888,12 @@ version: "3.9"
 
 services:
   app:
-    image: Secret Server-app:1.0
+    image: secret-server-app:1.0
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - Secret Server_DB_PASSWORD_FILE=/run/secrets/db_password
-      - Secret Server_KEY_FILE=/run/secrets/master_key
+      - SECRET_SERVER_DB_PASSWORD_FILE=/run/secrets/db_password
+      - SECRET_SERVER_KEY_FILE=/run/secrets/master_key
     volumes:
       - ./config/appsettings.Production.json:/app/appsettings.Production.json:ro
       - key_store:/run/secrets:ro
@@ -899,8 +907,8 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: Secret Server
-      POSTGRES_USER: Secret Server_app
+      POSTGRES_DB: secret_server
+      POSTGRES_USER: secret_server_app
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -909,7 +917,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U Secret Server_app"]
+      test: ["CMD-SHELL", "pg_isready -U secret_server_app"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -987,14 +995,14 @@ server {
 ### 12.3 File System Layout (Linux)
 
 ```
-/opt/Secret Server/          # Application binaries (owned: root, readable: Secret Server-app)
-/etc/Secret Server/
-    appsettings.Production.json   # chmod 640; owner: root:Secret Server-app
+/opt/secret-server/          # Application binaries (owned: root, readable: secret-server-app)
+/etc/secret-server/
+    appsettings.Production.json   # chmod 640; owner: root:secret-server-app
     master.key                    # chmod 400; owner: root (read by app via sudo or CAP)
     jwt.key                       # chmod 400; owner: root
-/var/lib/Secret Server/      # PostgreSQL data (if not containerized)
-/var/log/Secret Server/      # Application logs (chmod 750)
-/var/backup/Secret Server/   # Backup output (separate mount recommended)
+/var/lib/secret-server/      # PostgreSQL data (if not containerized)
+/var/log/secret-server/      # Application logs (chmod 750)
+/var/backup/secret-server/   # Backup output (separate mount recommended)
 ```
 
 ---
@@ -1003,28 +1011,28 @@ server {
 
 ### 13.1 Backup Procedure
 
-The nightly backup job (run by `Secret Server-backup` service account via cron / systemd timer) performs the following steps atomically:
+The nightly backup job (run by `secret_server_backup` service account via cron / systemd timer) performs the following steps atomically:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/var/backup/Secret Server"
+BACKUP_DIR="/var/backup/secret-server"
 TMP_DIR=$(mktemp -d)
-PASSPHRASE_FILE="/etc/Secret Server/backup.passphrase"  # chmod 400
+PASSPHRASE_FILE="/etc/secret-server/backup.passphrase"  # chmod 400
 
 # 1. Dump PostgreSQL
-pg_dump -U Secret Server_backup -F c Secret Server > "$TMP_DIR/db_${TIMESTAMP}.dump"
+pg_dump -U secret_server_backup -F c secret_server > "$TMP_DIR/db_${TIMESTAMP}.dump"
 
 # 2. Copy key file
-cp /etc/Secret Server/master.key "$TMP_DIR/master_${TIMESTAMP}.key"
+cp /etc/secret-server/master.key "$TMP_DIR/master_${TIMESTAMP}.key"
 
 # 3. Encrypt the bundle
 tar -czf - -C "$TMP_DIR" . \
-  | openssl enc -aes-256-gcm -pbkdf2 -iter 600000 \
+  | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 \
       -pass file:"$PASSPHRASE_FILE" \
-  > "$BACKUP_DIR/Secret Server_${TIMESTAMP}.enc"
+  > "$BACKUP_DIR/secret_server_${TIMESTAMP}.enc"
 
 # 4. Cleanup temp
 rm -rf "$TMP_DIR"
@@ -1032,30 +1040,30 @@ rm -rf "$TMP_DIR"
 # 5. Purge old backups
 find "$BACKUP_DIR" -name "*.enc" -mtime +30 -delete
 
-echo "Backup completed: Secret Server_${TIMESTAMP}.enc"
+echo "Backup completed: secret_server_${TIMESTAMP}.enc"
 ```
 
 ### 13.2 Restore Procedure
 
 ```bash
 # 1. Decrypt backup
-openssl enc -d -aes-256-gcm -pbkdf2 -iter 600000 \
-    -pass file:/etc/Secret Server/backup.passphrase \
-    -in Secret Server_20260215_020001.enc \
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+    -pass file:/etc/secret-server/backup.passphrase \
+    -in secret_server_20260215_020001.enc \
   | tar -xzf - -C /tmp/restore/
 
 # 2. Stop application
-systemctl stop Secret Server
+systemctl stop secret-server
 
 # 3. Restore key file
-cp /tmp/restore/master_*.key /etc/Secret Server/master.key
-chmod 400 /etc/Secret Server/master.key
+cp /tmp/restore/master_*.key /etc/secret-server/master.key
+chmod 400 /etc/secret-server/master.key
 
 # 4. Restore database
-pg_restore -U postgres -d Secret Server --clean /tmp/restore/db_*.dump
+pg_restore -U postgres -d secret_server --clean /tmp/restore/db_*.dump
 
 # 5. Start application
-systemctl start Secret Server
+systemctl start secret-server
 ```
 
 **RTO target:** < 2 hours from incident declaration to service restored.
@@ -1089,7 +1097,7 @@ Use this checklist during pre-production review and quarterly security audits.
 ### 14.3 Application
 
 - [ ] `ASPNETCORE_ENVIRONMENT=Production` set (disables developer error pages)
-- [ ] Swagger / OpenAPI UI disabled in production (docs endpoint behind auth)
+- [ ] Swagger / OpenAPI UI restricted to authenticated Super Admins on internal admin networks only
 - [ ] Detailed error messages suppressed in API responses
 - [ ] CSP header validated against target browsers
 - [ ] Rate limiting active on login and MFA endpoints

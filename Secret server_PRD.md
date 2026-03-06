@@ -324,7 +324,7 @@ All open issues from the initial draft have been resolved. Decisions are recorde
 
 | # | Issue | **Decision** | Rationale | Owner |
 |---|---|---|---|---|
-| 1 | Technology stack finalization | **ASP.NET Core 8 / C#** | Strongest native crypto support (AES-256-GCM, Argon2id in BCL), type safety, LTS, superior performance for CPU-bound encryption vs. Node.js. Node.js deferred for potential future API-only microservice use only. | IT Manager |
+| 1 | Technology stack finalization | **ASP.NET Core 8 / C#** | Strong crypto ecosystem support (AES-256-GCM in BCL; Argon2id via vetted .NET libraries), type safety, LTS, and strong performance for CPU-bound encryption vs. Node.js. Node.js deferred for potential future API-only microservice use only. | IT Manager |
 | 2 | LDAP / AD integration priority | **v1.0 — included** | LDAP/AD is a primary deployment requirement for enterprise environments; deferral would block initial rollout for most target sites. | IT Manager |
 | 3 | Key management strategy | **Local key file** | Simplest operational model for on-premises deployments with no additional infrastructure dependency. Key file stored on a separate volume with `chmod 400`. HashiCorp Vault support planned for v2.0. | Security Officer |
 | 4 | MFA enforcement policy | **Optional** (Super Admin configurable) | MFA is supported (TOTP/RFC 6238) and can be enforced per-user or globally by a Super Admin. Mandatory enforcement deferred to allow phased rollout. | IT Manager |

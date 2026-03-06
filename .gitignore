@@ -1,0 +1,7 @@
+﻿node_modules/
+.tmp-test/
+secrets/
+*.log
+src/web/node_modules/
+dist/
+artifacts/
