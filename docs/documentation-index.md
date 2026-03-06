@@ -12,6 +12,7 @@ Use this page as the starting point for all major Secret Server documentation.
 
 - Web application server installation/configuration: `docs/webapp-server-installation-configuration.md`
 - SQL Server fresh setup and schema initialization: `docs/sql-server-fresh-setup.md`
+- Windows secret protection (DPAPI + IIS): `docs/windows-secret-protection.md`
 
 ## Security and Governance
 
@@ -37,3 +38,4 @@ Use this page as the starting point for all major Secret Server documentation.
 ## Architecture and ADR
 
 - Runtime ADR: `docs/adr/0001-runtime-target-node-v1.md`
+

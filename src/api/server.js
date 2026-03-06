@@ -2,6 +2,7 @@ import http from 'node:http';
 import { Router } from './lib/router.js';
 import { notFound, sendError } from './lib/http.js';
 import { createLogger } from './lib/logger.js';
+import { loadProtectedSecrets } from './lib/protected-secrets.js';
 import { loadConfig } from './lib/config.js';
 import { CryptoService } from './lib/crypto.js';
 import { TokenService } from './lib/auth.js';
@@ -18,8 +19,9 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerDocsRoutes } from './routes/docs.js';
 import { registerHealthRoutes } from './routes/health.js';
 
-const config = loadConfig();
 const logger = createLogger('api');
+loadProtectedSecrets(logger);
+const config = loadConfig();
 const cryptoService = new CryptoService({ keyFilePath: config.keyFilePath });
 const tokenService = new TokenService({
   jwtSigningKeyPath: config.jwtSigningKeyPath,
@@ -137,3 +139,5 @@ server.listen(config.port, config.host, () => {
     env: config.env,
   });
 });
+
+

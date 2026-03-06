@@ -101,6 +101,12 @@ Routine checks:
 
 ## 8. Security Operations Checklist
 
+Secret handling standard:
+- Use DPAPI-protected secret files for SQL/LDAP/backup values.
+- Follow `docs/windows-secret-protection.md`.
+
+
+
 Daily/weekly checks:
 - Review failed logins/lockouts.
 - Review admin role changes.
@@ -174,4 +180,6 @@ Evidence reference:
 - Operations runbook: `docs/operations-runbook.md`
 - Web application server setup: `docs/webapp-server-installation-configuration.md`
 - SQL setup: `docs/sql-server-fresh-setup.md`
+
+
 

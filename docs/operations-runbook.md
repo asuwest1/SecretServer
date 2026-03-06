@@ -145,3 +145,14 @@ powershell -NoProfile -File infra/scripts/run-promotion-validation.ps1
 Outputs:
 - package + checksum artifacts in `artifacts/promotion-validation`
 - validation logs in `artifacts/promotion-validation/logs`
+
+## Windows secret protection (DPAPI)
+Reference implementation:
+- `docs/windows-secret-protection.md`
+
+Key scripts:
+- `infra/scripts/write-protected-secret.ps1`
+- `infra/scripts/read-protected-secret.ps1`
+- `infra/scripts/harden-secrets-acl.ps1`
+
+After secret updates, recycle app pool and run smoke validation.

@@ -65,6 +65,13 @@ Verify expected files:
 - `C:\inetpub\secret-server\secrets\master.key`
 - `C:\inetpub\secret-server\secrets\jwt.key`
 
+
+## 3.5 Protect Runtime Secrets (Recommended)
+
+Implement DPAPI-protected runtime secrets and ACL hardening:
+- `docs/windows-secret-protection.md`
+
+This replaces plaintext secret storage in environment files for SQL/LDAP/backup sensitive values.
 ## 4. SQL Database Initialization
 
 If this is a greenfield DB, follow:
@@ -145,5 +152,6 @@ Reference docs:
 - `docs/operations-runbook.md`
 - `docs/backup-restore-evidence.md`
 - `docs/staging-promotion-evidence.md`
+
 
 

@@ -133,7 +133,9 @@ powershell -NoProfile -File infra/scripts/promote-release.ps1 -PackagePath C:\pa
 
 ## Server installation guide
 - Web application server install/config: `docs/webapp-server-installation-configuration.md`
+- Windows secret protection (DPAPI + IIS): `docs/windows-secret-protection.md`
 
 ## User documentation
 - End-user guide: `docs/user-guide.md`
 - Administrator guide: `docs/administrator-guide.md`
+
