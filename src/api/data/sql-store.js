@@ -168,7 +168,9 @@ export class SqlStore extends Store {
   }
 
   async runSql(query) {
-    const args = ['-S', this.sql.server, '-d', this.sql.database, '-h', '-1', '-W', '-y', '0', '-Y', '0', '-Q', query];
+    // sqlcmd (notably on Linux mssql-tools18) rejects using -W together with -y/-Y.
+    // We keep -y/-Y for full-width output and omit -W for cross-platform compatibility.
+    const args = ['-S', this.sql.server, '-d', this.sql.database, '-h', '-1', '-y', '0', '-Y', '0', '-Q', query];
     if (this.sql.trustServerCertificate) {
       args.push('-C');
     }
@@ -511,4 +513,5 @@ COMMIT TRAN;
     }
   }
 }
+
 
