@@ -16,6 +16,7 @@ import { registerFolderRoutes } from '../src/api/routes/folders.js';
 import { registerSecretRoutes } from '../src/api/routes/secrets.js';
 import { registerAuditRoutes } from '../src/api/routes/audit.js';
 import { registerDocsRoutes } from '../src/api/routes/docs.js';
+import { registerHealthRoutes } from '../src/api/routes/health.js';
 
 const tempDir = path.join(process.cwd(), '.tmp-test');
 fs.mkdirSync(tempDir, { recursive: true });
@@ -109,7 +110,9 @@ async function main() {
     lockoutThreshold: 5,
     lockoutDurationMinutes: 30,
     requireMfa: false,
+    maxApiTokensPerUser: 2,
     ldap: { enabled: false, fallbackLocal: true },
+    sql: { enabled: false },
     openApi: { internalOnly: true, trustProxy: true },
   };
 
@@ -142,6 +145,7 @@ async function main() {
   registerSecretRoutes(router);
   registerAuditRoutes(router);
   registerDocsRoutes(router);
+  registerHealthRoutes(router);
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -199,6 +203,20 @@ async function main() {
     assert.equal(docsAllowed.status, 200);
     assert.ok((docsAllowed.raw || '').includes('openapi'));
 
+    const healthDepsUnauthed = await requestJson({
+      method: 'GET',
+      port,
+      pathName: '/health/deps',
+    });
+    assert.equal(healthDepsUnauthed.status, 401);
+
+    const healthDepsAdmin = await requestJson({
+      method: 'GET',
+      port,
+      pathName: '/health/deps',
+      headers: adminAuth,
+    });
+    assert.equal(healthDepsAdmin.status, 200);
     const invalidJsonRoleCreate = await requestRaw({
       method: 'POST',
       port,
@@ -228,6 +246,34 @@ async function main() {
     });
     assert.equal(createIsolatedRole.status, 201);
     const isolatedRoleId = createIsolatedRole.json?.data?.id;
+
+    const invalidUserCreate = await requestJson({
+      method: 'POST',
+      port,
+      pathName: '/api/v1/users',
+      headers: adminAuth,
+      body: {
+        username: 'ab',
+        password: 'StrongPass!123',
+        displayName: 'Bad User',
+        email: 'bad@example.test',
+      },
+    });
+    assert.equal(invalidUserCreate.status, 400);
+
+    const weakPasswordCreate = await requestJson({
+      method: 'POST',
+      port,
+      pathName: '/api/v1/users',
+      headers: adminAuth,
+      body: {
+        username: 'weakuser',
+        password: 'weakpassword123',
+        displayName: 'Weak User',
+        email: 'weak@example.test',
+      },
+    });
+    assert.equal(weakPasswordCreate.status, 400);
 
     const createUser = await requestJson({
       method: 'POST',
@@ -303,12 +349,50 @@ async function main() {
       method: 'POST',
       port,
       pathName: '/api/v1/auth/login',
-      body: { username: 'alice', password: 'StrongPass!123' },
+      body: { username: 'ALICE', password: 'StrongPass!123' },
     });
     assert.equal(loginAlice.status, 200);
     const aliceAccessToken = loginAlice.json?.data?.accessToken;
     assert.ok(aliceAccessToken);
     const aliceAuth = { Authorization: `Bearer ${aliceAccessToken}` };
+    const healthDepsNonAdmin = await requestJson({
+      method: 'GET',
+      port,
+      pathName: '/health/deps',
+      headers: aliceAuth,
+    });
+    assert.equal(healthDepsNonAdmin.status, 403);
+
+    for (let i = 0; i < 10; i += 1) {
+      const refreshAttempt = await requestJson({
+        method: 'POST',
+        port,
+        pathName: '/api/v1/auth/refresh',
+        body: { refreshToken: 'bogus-token' },
+      });
+      assert.equal(refreshAttempt.status, 401);
+    }
+
+    const refreshRateLimited = await requestJson({
+      method: 'POST',
+      port,
+      pathName: '/api/v1/auth/refresh',
+      body: { refreshToken: 'bogus-token' },
+    });
+    assert.equal(refreshRateLimited.status, 429);
+
+    const invalidSecretCreate = await requestJson({
+      method: 'POST',
+      port,
+      pathName: '/api/v1/secrets',
+      headers: aliceAuth,
+      body: {
+        folderId,
+        name: 'X'.repeat(201),
+        value: 'Value#Invalid',
+      },
+    });
+    assert.equal(invalidSecretCreate.status, 400);
 
     const createSecret = await requestJson({
       method: 'POST',
@@ -422,6 +506,8 @@ async function main() {
     });
     assert.equal(versions.status, 200);
     assert.equal((versions.json?.data || []).length, 1);
+    assert.equal(versions.json?.data?.[0]?.valueEnc, undefined);
+    assert.equal(versions.json?.data?.[0]?.dekEnc, undefined);
 
     const searchByNotes = await requestJson({
       method: 'GET',
@@ -476,6 +562,15 @@ async function main() {
     });
     assert.equal(createWriteToken.status, 201);
     const writeToken = createWriteToken.json?.data?.rawToken;
+
+    const createExtraToken = await requestJson({
+      method: 'POST',
+      port,
+      pathName: `/api/v1/users/${aliceId}/api-tokens`,
+      headers: aliceAuth,
+      body: { name: 'extra', scopes: ['read'] },
+    });
+    assert.equal(createExtraToken.status, 409);
 
     const writeAllowed = await requestJson({
       method: 'PUT',
@@ -546,20 +641,6 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

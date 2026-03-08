@@ -1,7 +1,17 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import { sendError } from '../lib/http.js';
 
 const buckets = new Map();
+let lastSweepMinute = -1;
+
+function sweepBuckets(currentMinute) {
+  for (const [key, entry] of buckets.entries()) {
+    if (!entry || entry.minute < currentMinute - 1) {
+      buckets.delete(key);
+    }
+  }
+  lastSweepMinute = currentMinute;
+}
 
 function hasScope(scopes, requiredScope) {
   const set = new Set((scopes || []).map((s) => String(s).toLowerCase()));
@@ -13,13 +23,25 @@ function hasScope(scopes, requiredScope) {
   return set.has(need);
 }
 
-export function allowRateLimit(key, limitPerMinute) {
-  const now = Date.now();
-  const minute = Math.floor(now / 60000);
-  const bucketKey = `${key}:${minute}`;
-  const count = (buckets.get(bucketKey) || 0) + 1;
-  buckets.set(bucketKey, count);
-  return count <= limitPerMinute;
+export function allowRateLimit(key, limitPerMinute, nowMs = Date.now()) {
+  const minute = Math.floor(nowMs / 60000);
+  if (lastSweepMinute !== minute || buckets.size > 10000) {
+    sweepBuckets(minute);
+  }
+
+  const existing = buckets.get(key);
+  if (!existing || existing.minute !== minute) {
+    buckets.set(key, { minute, count: 1 });
+    return 1 <= limitPerMinute;
+  }
+
+  existing.count += 1;
+  buckets.set(key, existing);
+  return existing.count <= limitPerMinute;
+}
+
+export function _getRateLimitBucketCount() {
+  return buckets.size;
 }
 
 export function getBearerToken(req) {

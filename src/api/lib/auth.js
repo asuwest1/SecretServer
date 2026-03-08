@@ -1,4 +1,4 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -12,11 +12,22 @@ function base64UrlDecode(value) {
 
 function ensureSigningKey(filePath) {
   if (fs.existsSync(filePath)) {
+    try {
+      fs.chmodSync(filePath, 0o600);
+    } catch {
+      // Best effort on platforms that ignore POSIX mode bits.
+    }
     return fs.readFileSync(filePath);
   }
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const key = crypto.randomBytes(32);
-  fs.writeFileSync(filePath, key);
+  fs.writeFileSync(filePath, key, { mode: 0o600 });
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    // Best effort on platforms that ignore POSIX mode bits.
+  }
   return key;
 }
 

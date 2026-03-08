@@ -1,6 +1,13 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import { json, readJson, sendError } from '../lib/http.js';
 import { hashPassword } from '../lib/password.js';
+import {
+  normalizeForLookup,
+  validateDisplayName,
+  validateEmail,
+  validatePassword,
+  validateUsername,
+} from '../lib/validation.js';
 import { buildOtpAuthUri, generateTotpSecret, verifyTotp } from '../lib/totp.js';
 import { requireAuth, requireSuperAdmin, hashApiToken } from '../services/security.js';
 
@@ -29,22 +36,28 @@ export function registerUserRoutes(router) {
     if (!actor || !requireSuperAdmin(res, ctx, actor)) return;
 
     const body = await readJson(req);
-    if (!body.username || !body.password || !body.displayName || !body.email) {
-      sendError(res, 400, 'VALIDATION_ERROR', 'username, password, displayName, email are required.', ctx.traceId);
+    const usernameCheck = validateUsername(body.username);
+    const passwordCheck = validatePassword(body.password);
+    const displayNameCheck = validateDisplayName(body.displayName);
+    const emailCheck = validateEmail(body.email);
+    if (!usernameCheck.ok || !passwordCheck.ok || !displayNameCheck.ok || !emailCheck.ok) {
+      const reason = usernameCheck.error || passwordCheck.error || displayNameCheck.error || emailCheck.error;
+      sendError(res, 400, 'VALIDATION_ERROR', reason, ctx.traceId);
       return;
     }
 
-    if (ctx.store.users.some((u) => u.username === body.username)) {
+    const usernameLookup = normalizeForLookup(usernameCheck.value);
+    if (ctx.store.users.some((u) => normalizeForLookup(u.username) === usernameLookup)) {
       sendError(res, 409, 'CONFLICT', 'Username already exists.', ctx.traceId);
       return;
     }
 
     const newUser = {
       id: crypto.randomUUID(),
-      username: body.username,
-      displayName: body.displayName,
-      email: body.email,
-      passwordHash: await hashPassword(body.password),
+      username: usernameCheck.value,
+      displayName: displayNameCheck.value,
+      email: emailCheck.value,
+      passwordHash: await hashPassword(passwordCheck.value),
       mfaEnabled: false,
       mfaSecretEnc: null,
       mfaPendingSecretEnc: null,
@@ -101,12 +114,21 @@ export function registerUserRoutes(router) {
       return;
     }
 
+    const maxTokensPerUser = Math.max(1, Number(ctx.config.maxApiTokensPerUser || 20));
+    const now = Date.now();
+    const activeTokenCount = ctx.store.apiTokens.filter((t) => t.userId === ctx.params.id && (!t.expiresAt || new Date(t.expiresAt).getTime() > now)).length;
+    if (activeTokenCount >= maxTokensPerUser) {
+      sendError(res, 409, 'CONFLICT', 'API token limit reached for user.', ctx.traceId);
+      return;
+    }
+
     const body = await readJson(req);
+    const tokenName = String(body.name || 'default').trim().slice(0, 128) || 'default';
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenRecord = {
       id: crypto.randomUUID(),
       userId: ctx.params.id,
-      name: body.name || 'default',
+      name: tokenName,
       scopes: normalizeScopes(body.scopes),
       tokenHash: hashApiToken(rawToken),
       createdAt: new Date().toISOString(),

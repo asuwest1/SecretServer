@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { json, readJson, sendError } from '../lib/http.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { verifyTotp } from '../lib/totp.js';
+import { normalizeForLookup, validatePassword } from '../lib/validation.js';
 import { allowRateLimit, hashToken, requireAuth, requireSuperAdmin } from '../services/security.js';
 
 function isLocked(user) {
@@ -161,7 +162,7 @@ function verifyUserMfaCode(ctx, user, code) {
 
 export function registerAuthRoutes(router) {
   router.register('POST', /^\/api\/v1\/auth\/login$/, async (req, res, ctx) => {
-    if (!allowRateLimit(`login:${req.socket.remoteAddress}`, 10)) {
+    if (!allowRateLimit('login:' + req.socket.remoteAddress, 10)) {
       sendError(res, 429, 'RATE_LIMITED', 'Too many requests.', ctx.traceId);
       return;
     }
@@ -169,15 +170,21 @@ export function registerAuthRoutes(router) {
     const body = await readJson(req);
     const { username, password } = body;
 
-    if (!username || !password) {
+    const usernameText = String(username || '').trim();
+    const passwordText = String(password || '');
+    if (!usernameText || !passwordText) {
       sendError(res, 400, 'VALIDATION_ERROR', 'Username and password are required.', ctx.traceId);
+      return;
+    }
+    if (usernameText.length > 128 || passwordText.length > 512) {
+      sendError(res, 400, 'VALIDATION_ERROR', 'Credential input exceeds maximum length.', ctx.traceId);
       return;
     }
 
     let user = null;
 
     if (ctx.config.ldap.enabled) {
-      const ldapResult = await ctx.ldap.authenticate(username, password);
+      const ldapResult = await ctx.ldap.authenticate(usernameText, passwordText);
       if (ldapResult.ok) {
         user = ensureLocalUserForLdap(ctx.store, ldapResult);
         syncLdapGroupsToRoles(ctx.store, user.id, ldapResult.groups, ctx.config.ldap, ctx.logger);
@@ -189,7 +196,8 @@ export function registerAuthRoutes(router) {
     }
 
     if (!user) {
-      user = ctx.store.users.find((u) => u.username === username && u.isActive);
+      const usernameLookup = normalizeForLookup(usernameText);
+      user = ctx.store.users.find((u) => normalizeForLookup(u.username) === usernameLookup && u.isActive);
       if (!user || isLocked(user)) {
         sendError(res, 401, 'UNAUTHENTICATED', 'Invalid credentials.', ctx.traceId);
         return;
@@ -200,7 +208,7 @@ export function registerAuthRoutes(router) {
         return;
       }
 
-      const valid = await verifyPassword(password, user.passwordHash);
+      const valid = await verifyPassword(passwordText, user.passwordHash);
       if (!valid) {
         user.failedAttempts += 1;
         if (user.failedAttempts >= ctx.config.lockoutThreshold) {
@@ -244,7 +252,7 @@ export function registerAuthRoutes(router) {
   });
 
   router.register('POST', /^\/api\/v1\/auth\/mfa$/, async (req, res, ctx) => {
-    if (!allowRateLimit(`mfa:${req.socket.remoteAddress}`, 5)) {
+    if (!allowRateLimit('mfa:' + req.socket.remoteAddress, 5)) {
       sendError(res, 429, 'RATE_LIMITED', 'Too many requests.', ctx.traceId);
       return;
     }
@@ -295,6 +303,10 @@ export function registerAuthRoutes(router) {
   });
 
   router.register('POST', /^\/api\/v1\/auth\/refresh$/, async (req, res, ctx) => {
+    if (!allowRateLimit('refresh:' + req.socket.remoteAddress, 10)) {
+      sendError(res, 429, 'RATE_LIMITED', 'Too many requests.', ctx.traceId);
+      return;
+    }
     const body = await readJson(req);
     const { refreshToken } = body;
 
@@ -374,10 +386,17 @@ export function registerAuthRoutes(router) {
       return;
     }
 
-    const passwordHash = await hashPassword(body.password);
+    const passwordCheck = validatePassword(body.password);
+    if (!passwordCheck.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', passwordCheck.error, ctx.traceId);
+      return;
+    }
+
+    const passwordHash = await hashPassword(passwordCheck.value);
     ctx.store.seedSuperAdmin({ username: body.username, passwordHash });
     json(res, 201, { data: { created: true } });
   });
 }
+
 
 

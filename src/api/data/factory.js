@@ -1,4 +1,4 @@
-﻿import { Store } from './store.js';
+import { Store } from './store.js';
 import { SqlStore } from './sql-store.js';
 
 function migrationIdToNumber(value) {
@@ -18,7 +18,7 @@ export async function createStore(config, logger) {
     const sqlStore = new SqlStore(config.sql, logger);
     await sqlStore.load();
 
-    const applied = sqlStore.getAppliedMigrations();
+    const applied = await sqlStore.getAppliedMigrations();
     const appliedMax = applied.reduce((max, m) => Math.max(max, migrationIdToNumber(m.version)), 0);
     const required = Number.parseInt(config.sql.requiredMigration, 10) || 0;
 
@@ -40,3 +40,4 @@ export async function createStore(config, logger) {
     return store;
   }
 }
+

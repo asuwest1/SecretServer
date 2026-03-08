@@ -26,6 +26,12 @@ function jsonObject(name, fallback = {}) {
   }
 }
 
+function csvList(name, fallback = []) {
+  const raw = env(name, '');
+  if (!raw) return fallback;
+  return raw.split(',').map((x) => x.trim()).filter((x) => x.length > 0);
+}
+
 export function loadConfig() {
   const keyFilePath = env('SECRET_SERVER_KEY_FILE', './secrets/master.key');
   const jwtSigningKeyPath = env('SECRET_SERVER_JWT_KEY_FILE', './secrets/jwt.key');
@@ -37,6 +43,9 @@ export function loadConfig() {
     issuer: env('SECRET_SERVER_ISSUER', 'SecretServer'),
     accessTokenLifetimeMinutes: int('SECRET_SERVER_ACCESS_TOKEN_LIFETIME_MINUTES', 15),
     refreshTokenLifetimeHours: int('SECRET_SERVER_REFRESH_TOKEN_LIFETIME_HOURS', 8),
+    cors: {
+      allowedOrigins: csvList('SECRET_SERVER_CORS_ALLOWED_ORIGINS', []),
+    },
     lockoutThreshold: int('SECRET_SERVER_LOCKOUT_THRESHOLD', 5),
     lockoutDurationMinutes: int('SECRET_SERVER_LOCKOUT_DURATION_MINUTES', 30),
     requireMfa: bool('SECRET_SERVER_REQUIRE_MFA', false),
@@ -88,3 +97,4 @@ export function loadConfig() {
     fileExists: (filePath) => fs.existsSync(filePath),
   };
 }
+

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
 function normalizeUsername(value) {
@@ -19,8 +19,61 @@ function normalizeGroups(groups, maxGroups) {
   return [...deduped];
 }
 
+function runProcessAsync(command, args, options = {}) {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, args, {
+        windowsHide: true,
+        ...options,
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let finished = false;
+
+      const timeoutMs = options.timeout;
+      let timeoutHandle = null;
+      if (timeoutMs && timeoutMs > 0) {
+        timeoutHandle = setTimeout(() => {
+          if (!finished) {
+            child.kill();
+          }
+        }, timeoutMs);
+      }
+
+      child.stdout?.on('data', (chunk) => {
+        stdout += chunk.toString('utf8');
+      });
+      child.stderr?.on('data', (chunk) => {
+        stderr += chunk.toString('utf8');
+      });
+
+      child.on('error', (error) => {
+        if (finished) return;
+        finished = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        resolve({ status: 1, stdout, stderr, error });
+      });
+
+      child.on('close', (code) => {
+        if (finished) return;
+        finished = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        resolve({ status: code ?? 1, stdout, stderr });
+      });
+
+      if (options.input) {
+        child.stdin?.write(options.input);
+      }
+      child.stdin?.end();
+    } catch (error) {
+      resolve({ status: 1, stdout: '', stderr: '', error });
+    }
+  });
+}
+
 export class LdapService {
-  constructor(config, logger, runner = spawnSync) {
+  constructor(config, logger, runner = null) {
     this.config = config;
     this.logger = logger;
     this.runner = runner;
@@ -46,6 +99,13 @@ export class LdapService {
     return { ok: true };
   }
 
+  async execute(command, args, options) {
+    if (this.runner) {
+      return await this.runner(command, args, options);
+    }
+    return runProcessAsync(command, args, options);
+  }
+
   async authenticate(username, password) {
     if (!this.config.enabled) {
       return { ok: false, reason: 'LDAP_DISABLED' };
@@ -62,6 +122,7 @@ export class LdapService {
       return { ok: false, reason: 'INVALID_CREDENTIALS' };
     }
 
+    const serviceAccountPasswordEnv = 'SECRET_SERVER_LDAP_BIND_PASSWORD';
     const payload = JSON.stringify({
       username: safeUsername,
       password,
@@ -70,15 +131,21 @@ export class LdapService {
       port: this.config.port,
       baseDn: this.config.baseDn,
       serviceAccountDn: this.config.serviceAccountDn,
-      serviceAccountPassword: this.config.serviceAccountPassword,
+      serviceAccountPasswordEnv,
       requireLdaps: this.config.requireLdaps,
     });
 
-    const result = this.runner('powershell', ['-NoProfile', '-File', this.config.authScriptPath, '-Payload', payload], {
+    const env = { ...process.env };
+    if (this.config.serviceAccountPassword) {
+      env[serviceAccountPasswordEnv] = this.config.serviceAccountPassword;
+    }
+
+    const result = await this.execute('powershell', ['-NoProfile', '-File', this.config.authScriptPath], {
       encoding: 'utf8',
       timeout: Math.max(1000, this.config.authTimeoutMs || 8000),
-      maxBuffer: 1024 * 1024,
       windowsHide: true,
+      input: payload,
+      env,
     });
 
     if (result.error) {

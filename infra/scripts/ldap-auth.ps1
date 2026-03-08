@@ -1,11 +1,15 @@
 param(
-  [Parameter(Mandatory=$true)][string]$Payload
+  [string]$Payload
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 try {
+  if ([string]::IsNullOrWhiteSpace($Payload)) {
+    $Payload = [Console]::In.ReadToEnd()
+  }
+
   $input = $Payload | ConvertFrom-Json
   $username = [string]$input.username
   $password = [string]$input.password
@@ -13,7 +17,14 @@ try {
   $server = [string]$input.server
   $baseDn = [string]$input.baseDn
   $serviceAccountDn = [string]$input.serviceAccountDn
-  $serviceAccountPassword = [string]$input.serviceAccountPassword
+  $serviceAccountPasswordEnv = [string]$input.serviceAccountPasswordEnv
+  $serviceAccountPassword = ''
+  if (-not [string]::IsNullOrWhiteSpace($serviceAccountPasswordEnv)) {
+    $servicePasswordVar = Get-Item -Path "Env:$serviceAccountPasswordEnv" -ErrorAction SilentlyContinue
+    if ($null -ne $servicePasswordVar) {
+      $serviceAccountPassword = [string]$servicePasswordVar.Value
+    }
+  }
   $port = [int]$input.port
   $requireLdaps = [bool]$input.requireLdaps
 

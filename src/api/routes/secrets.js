@@ -2,6 +2,14 @@ import crypto from 'node:crypto';
 import { json, readJson, sendError } from '../lib/http.js';
 import { requireAuth } from '../services/security.js';
 import { resolveSecretPermission } from '../services/permissions.js';
+import {
+  validateLargeText,
+  validateOptionalText,
+  validateOptionalUrl,
+  validateSecretName,
+  validateSecretType,
+  validateTags,
+} from '../lib/validation.js';
 
 function getRoleIds(store, userId) {
   return store.userRoles.filter((ur) => ur.userId === userId).map((ur) => ur.roleId);
@@ -78,6 +86,23 @@ export function registerSecretRoutes(router) {
     if (!actor) return;
 
     const body = await readJson(req);
+    const nameCheck = validateSecretName(body.name);
+    const typeCheck = validateSecretType(body.secretType);
+    const usernameCheck = validateOptionalText(body.username, 'Username', 128);
+    const urlCheck = validateOptionalUrl(body.url);
+    const tagsCheck = validateTags(body.tags);
+    const valueCheck = validateLargeText(body.value ?? '', 'Secret value', 8192);
+    const notesCheck = validateLargeText(body.notes ?? '', 'Secret notes', 16384);
+    if (!body.folderId || String(body.folderId).length > 64) {
+      sendError(res, 400, 'VALIDATION_ERROR', 'folderId is required and must be <= 64 characters.', ctx.traceId);
+      return;
+    }
+    if (!nameCheck.ok || !typeCheck.ok || !usernameCheck.ok || !urlCheck.ok || !tagsCheck.ok || !valueCheck.ok || !notesCheck.ok) {
+      const reason = nameCheck.error || typeCheck.error || usernameCheck.error || urlCheck.error || tagsCheck.error || valueCheck.error || notesCheck.error;
+      sendError(res, 400, 'VALIDATION_ERROR', reason, ctx.traceId);
+      return;
+    }
+
     const folder = ctx.store.folders.find((f) => f.id === body.folderId);
     if (!folder) {
       sendError(res, 404, 'NOT_FOUND', 'Folder not found.', ctx.traceId);
@@ -100,18 +125,18 @@ export function registerSecretRoutes(router) {
     }
 
     await ctx.store.runInTransaction(async () => {
-      const valueEncryption = ctx.crypto.encryptSecret(body.value || '');
+      const valueEncryption = ctx.crypto.encryptSecret(valueCheck.value);
       const valueDek = ctx.crypto.unwrapDek(valueEncryption.encryptedDek);
-      const notesEncryption = ctx.crypto.encryptWithKey(body.notes || '', valueDek);
+      const notesEncryption = ctx.crypto.encryptWithKey(notesCheck.value, valueDek);
 
       const secret = {
         id: crypto.randomUUID(),
         folderId: body.folderId,
-        name: body.name,
-        secretType: body.secretType || 'password',
-        username: body.username || null,
-        url: body.url || null,
-        tags: body.tags || [],
+        name: nameCheck.value,
+        secretType: typeCheck.value,
+        username: usernameCheck.value,
+        url: urlCheck.value,
+        tags: tagsCheck.value,
         valueEnc: valueEncryption.encryptedValue,
         notesEnc: notesEncryption,
         dekEnc: valueEncryption.encryptedDek,
@@ -190,24 +215,38 @@ export function registerSecretRoutes(router) {
     }
 
     const body = await readJson(req);
+    const nameCheck = body.name !== undefined ? validateSecretName(body.name) : { ok: true };
+    const typeCheck = body.secretType !== undefined ? validateSecretType(body.secretType) : { ok: true };
+    const usernameCheck = body.username !== undefined ? validateOptionalText(body.username, 'Username', 128) : { ok: true };
+    const urlCheck = body.url !== undefined ? validateOptionalUrl(body.url) : { ok: true };
+    const tagsCheck = body.tags !== undefined ? validateTags(body.tags) : { ok: true };
+    const valueCheck = body.value !== undefined ? validateLargeText(body.value, 'Secret value', 8192) : { ok: true };
+    const notesCheck = body.notes !== undefined ? validateLargeText(body.notes, 'Secret notes', 16384) : { ok: true };
+    if (!nameCheck.ok || !typeCheck.ok || !usernameCheck.ok || !urlCheck.ok || !tagsCheck.ok || !valueCheck.ok || !notesCheck.ok) {
+      const reason = nameCheck.error || typeCheck.error || usernameCheck.error || urlCheck.error || tagsCheck.error || valueCheck.error || notesCheck.error;
+      sendError(res, 400, 'VALIDATION_ERROR', reason, ctx.traceId);
+      return;
+    }
+
     await ctx.store.runInTransaction(async () => {
       const oldValue = secret.valueEnc;
       const oldDek = secret.dekEnc;
 
       if (body.value !== undefined) {
-        const encrypted = ctx.crypto.encryptSecret(body.value);
+        const encrypted = ctx.crypto.encryptSecret(valueCheck.value);
         secret.valueEnc = encrypted.encryptedValue;
         secret.dekEnc = encrypted.encryptedDek;
       }
       if (body.notes !== undefined) {
         const secretDek = ctx.crypto.unwrapDek(secret.dekEnc);
-        secret.notesEnc = ctx.crypto.encryptWithKey(body.notes, secretDek);
+        secret.notesEnc = ctx.crypto.encryptWithKey(notesCheck.value, secretDek);
       }
 
-      secret.name = body.name || secret.name;
-      secret.username = body.username ?? secret.username;
-      secret.url = body.url ?? secret.url;
-      secret.tags = body.tags || secret.tags;
+      secret.name = body.name !== undefined ? nameCheck.value : secret.name;
+      secret.secretType = body.secretType !== undefined ? typeCheck.value : secret.secretType;
+      secret.username = body.username !== undefined ? usernameCheck.value : secret.username;
+      secret.url = body.url !== undefined ? urlCheck.value : secret.url;
+      secret.tags = body.tags !== undefined ? tagsCheck.value : secret.tags;
       secret.updatedBy = actor.id;
       secret.updatedAt = new Date().toISOString();
 
@@ -313,7 +352,15 @@ export function registerSecretRoutes(router) {
       return;
     }
 
-    const versions = ctx.store.secretVersions.filter((v) => v.secretId === secret.id);
+    const versions = ctx.store.secretVersions
+      .filter((v) => v.secretId === secret.id)
+      .map((v) => ({
+        id: v.id,
+        secretId: v.secretId,
+        versionNum: v.versionNum,
+        changedBy: v.changedBy,
+        changedAt: v.changedAt,
+      }));
     json(res, 200, { data: versions });
   });
 
@@ -352,6 +399,7 @@ export function registerSecretRoutes(router) {
     }
 
     const body = await readJson(req);
+
     await ctx.store.runInTransaction(async () => {
       ctx.store.secretAcl = ctx.store.secretAcl.filter((a) => a.secretId !== secret.id);
       for (const entry of body.entries || []) {
@@ -379,5 +427,20 @@ export function registerSecretRoutes(router) {
     });
   });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

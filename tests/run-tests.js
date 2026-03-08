@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword } from '../src/api/lib/password.js';
 import { TokenService } from '../src/api/lib/auth.js';
 import { generateTotpSecret, verifyTotp } from '../src/api/lib/totp.js';
 import { Store } from '../src/api/data/store.js';
-import { requireAuth, hashApiToken } from '../src/api/services/security.js';
+import { requireAuth, hashApiToken, allowRateLimit, _getRateLimitBucketCount } from '../src/api/services/security.js';
 import { LdapService } from '../src/api/services/ldap.js';
 import { SyslogService } from '../src/api/services/syslog.js';
 
@@ -214,16 +214,22 @@ async function testLdapServiceValidationAndNormalization() {
     maxGroups: 2,
   };
 
-  const runner = () => ({
-    status: 0,
-    stdout: JSON.stringify({
-      ok: true,
-      username: 'alice',
-      displayName: 'Alice',
-      email: 'alice@example.test',
-      groups: ['Ops', 'Ops', 'Admins', 'Audit'],
-    }),
-  });
+  let capturedArgs = null;
+  let capturedOptions = null;
+  const runner = (_cmd, args, options) => {
+    capturedArgs = args;
+    capturedOptions = options;
+    return {
+      status: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        username: 'alice',
+        displayName: 'Alice',
+        email: 'alice@example.test',
+        groups: ['Ops', 'Ops', 'Admins', 'Audit'],
+      }),
+    };
+  };
 
   const ldap = new LdapService(cfg, logger, runner);
   const result = await ldap.authenticate('alice', 'password');
@@ -314,6 +320,17 @@ async function testSyslogFailureModes() {
   assert.ok(warnings.includes('syslog_protocol_invalid'));
   return 'syslog protocol failure modes';
 }
+
+async function testRateLimitBucketCleanup() {
+  const now = Date.now();
+  allowRateLimit('cleanup:a', 5, now - 5 * 60000);
+  allowRateLimit('cleanup:b', 5, now - 4 * 60000);
+  allowRateLimit('cleanup:c', 5, now - 3 * 60000);
+  allowRateLimit('cleanup:current', 5, now);
+
+  assert.equal(_getRateLimitBucketCount() <= 2, true);
+  return 'rate limit bucket cleanup';
+}
 async function testLdapServiceInvalidLdapsConfig() {
   const logger = { warn: () => {}, debug: () => {} };
   const cfg = {
@@ -349,6 +366,7 @@ const tests = [
   testBearerAdminScopeRequired,
   testLdapServiceValidationAndNormalization,
   testLdapServiceInvalidLdapsConfig,
+  testRateLimitBucketCleanup,
   testAuditIntegrityAndRetention,
   testSyslogFailureModes,
 ];
@@ -358,6 +376,9 @@ for (const run of tests) {
   process.stdout.write(`PASS ${name}\n`);
 }
 process.stdout.write('ALL TESTS PASSED\n');
+
+
+
 
 
 

@@ -78,6 +78,24 @@ registerDocsRoutes(router);
 
 let lastSyslogAuditId = 0;
 
+function resolveAllowedCorsOrigin(req, appConfig) {
+  const requestOrigin = String(req.headers.origin || '').trim();
+  if (!requestOrigin) return null;
+  const allowedOrigins = appConfig.cors?.allowedOrigins || [];
+  if (!Array.isArray(allowedOrigins) || allowedOrigins.length === 0) return null;
+  return allowedOrigins.includes(requestOrigin) ? requestOrigin : null;
+}
+
+function applyCorsHeaders(req, res, appConfig) {
+  const allowedOrigin = resolveAllowedCorsOrigin(req, appConfig);
+  if (!allowedOrigin) return false;
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  return true;
+}
+
 const server = http.createServer(async (req, res) => {
   const start = Date.now();
   res.setHeader('X-Frame-Options', 'DENY');
@@ -88,13 +106,22 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
 
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-      'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    });
+    const allowed = applyCorsHeaders(req, res, config);
+    if (!allowed && req.headers.origin) {
+      sendError(res, 403, 'PERMISSION_DENIED', 'Origin is not allowed.', 'cors');
+      return;
+    }
+    res.writeHead(204);
     res.end();
     return;
+  }
+
+  if (req.headers.origin) {
+    const allowed = applyCorsHeaders(req, res, config);
+    if (!allowed) {
+      sendError(res, 403, 'PERMISSION_DENIED', 'Origin is not allowed.', 'cors');
+      return;
+    }
   }
 
   try {
@@ -147,5 +174,4 @@ server.listen(config.port, config.host, () => {
     env: config.env,
   });
 });
-
 

@@ -38,6 +38,9 @@ function sanitizeDetail(detail) {
   return clone;
 }
 
+const MAX_REFRESH_SESSIONS = 200000;
+const MAX_REVOKED_JTI = 200000;
+
 export class Store {
   constructor() {
     this.users = [];
@@ -205,6 +208,37 @@ export class Store {
     return { ok: true, count: records.length, latestHash: previousHash };
   }
 
+  rechainAuditLog() {
+    let prevHash = null;
+    for (const record of this.auditLog) {
+      const userDetail = sanitizeDetail(record.detail);
+      const hash = auditDigest({
+        id: record.id,
+        eventTime: record.eventTime,
+        userId: record.userId || null,
+        username: record.username || null,
+        action: record.action || null,
+        resource: record.resource || null,
+        resourceId: record.resourceId || null,
+        secretName: record.secretName || null,
+        ipAddress: record.ipAddress || null,
+        userAgent: record.userAgent || null,
+        detail: userDetail,
+        prevHash,
+      });
+      record.integrityHash = hash;
+      record.detail = {
+        ...userDetail,
+        integrity: {
+          algorithm: 'sha256',
+          prevHash,
+          hash,
+        },
+      };
+      prevHash = hash;
+    }
+  }
+
   enforceAuditRetention({ retentionDays = 90, maxEntries = 200000 } = {}) {
     const now = Date.now();
     const minTime = now - Math.max(1, retentionDays) * 24 * 60 * 60 * 1000;
@@ -217,10 +251,34 @@ export class Store {
     if (this.auditLog.length > maxEntries) {
       this.auditLog = this.auditLog.slice(this.auditLog.length - maxEntries);
     }
+
+    this.rechainAuditLog();
+    this.auditSequence = this.auditLog.length > 0 ? Math.max(...this.auditLog.map((a) => Number(a.id) || 0)) : 0;
+  }
+
+  enforceSessionRetention() {
+    const now = Date.now();
+    this.refreshSessions = this.refreshSessions.filter((s) => {
+      const expiry = s.expiresAt ? new Date(s.expiresAt).getTime() : null;
+      const revoked = s.revokedAt ? new Date(s.revokedAt).getTime() : null;
+      if (!Number.isFinite(expiry)) return true;
+      if (expiry > now) return true;
+      if (revoked && now - revoked < 24 * 60 * 60 * 1000) return true;
+      return false;
+    });
+
+    if (this.refreshSessions.length > MAX_REFRESH_SESSIONS) {
+      this.refreshSessions = this.refreshSessions.slice(this.refreshSessions.length - MAX_REFRESH_SESSIONS);
+    }
+
+    if (this.revokedTokenJti.length > MAX_REVOKED_JTI) {
+      this.revokedTokenJti = this.revokedTokenJti.slice(this.revokedTokenJti.length - MAX_REVOKED_JTI);
+    }
   }
 
   addRefreshSession(session) {
     this.refreshSessions.push(session);
+    this.enforceSessionRetention();
   }
 
   findRefreshSession(jti) {
@@ -235,6 +293,7 @@ export class Store {
     if (!this.revokedTokenJti.includes(jti)) {
       this.revokedTokenJti.push(jti);
     }
+    this.enforceSessionRetention();
   }
 
   revokeUserSessions(userId) {
@@ -246,6 +305,7 @@ export class Store {
         }
       }
     }
+    this.enforceSessionRetention();
   }
 
   isRevokedJti(jti) {
@@ -271,3 +331,4 @@ export class Store {
     return;
   }
 }
+
