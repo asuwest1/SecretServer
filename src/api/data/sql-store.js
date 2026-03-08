@@ -269,29 +269,29 @@ END;
   async load() {
     await this.ensureRuntimeTables();
 
-    this.users = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, username, display_name AS displayName, email, password_hash AS passwordHash, mfa_enabled AS mfaEnabled, mfa_secret_enc AS mfaSecretEnc, mfa_pending_secret_enc AS mfaPendingSecretEnc, is_active AS isActive, is_super_admin AS isSuperAdmin, failed_attempts AS failedAttempts, locked_until AS lockedUntil, created_at AS createdAt, updated_at AS updatedAt, last_login_at AS lastLoginAt FROM users FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.users = (await this.runJsonQuery("SET NOCOUNT ON; SELECT id, username, display_name AS displayName, email, password_hash AS passwordHash, mfa_enabled AS mfaEnabled, mfa_secret_enc AS mfaSecretEnc, mfa_pending_secret_enc AS mfaPendingSecretEnc, is_active AS isActive, is_super_admin AS isSuperAdmin, failed_attempts AS failedAttempts, locked_until AS lockedUntil, created_at AS createdAt, updated_at AS updatedAt, last_login_at AS lastLoginAt FROM users FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((u) => ({ ...u, mfaSecretEnc: u.mfaSecretEnc ? JSON.parse(u.mfaSecretEnc) : null, mfaPendingSecretEnc: u.mfaPendingSecretEnc ? JSON.parse(u.mfaPendingSecretEnc) : null, mfaEnabled: !!u.mfaEnabled, isActive: !!u.isActive, isSuperAdmin: !!u.isSuperAdmin }));
 
     this.roles = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM roles FOR JSON PATH, INCLUDE_NULL_VALUES;");
     this.userRoles = await this.runJsonQuery("SET NOCOUNT ON; SELECT user_id AS userId, role_id AS roleId, assigned_at AS assignedAt, assigned_by AS assignedBy FROM user_roles FOR JSON PATH, INCLUDE_NULL_VALUES;");
     this.folders = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, name, parent_folder_id AS parentFolderId, created_by AS createdBy, created_at AS createdAt, updated_at AS updatedAt FROM folders FOR JSON PATH, INCLUDE_NULL_VALUES;");
 
-    this.secrets = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, folder_id AS folderId, name, secret_type AS secretType, username, url, notes_enc AS notesEnc, tags, value_enc AS valueEnc, dek_enc AS dekEnc, is_deleted AS isDeleted, deleted_at AS deletedAt, purge_after AS purgeAfter, created_by AS createdBy, created_at AS createdAt, updated_by AS updatedBy, updated_at AS updatedAt FROM secrets FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.secrets = (await this.runJsonQuery("SET NOCOUNT ON; SELECT id, folder_id AS folderId, name, secret_type AS secretType, username, url, notes_enc AS notesEnc, tags, value_enc AS valueEnc, dek_enc AS dekEnc, is_deleted AS isDeleted, deleted_at AS deletedAt, purge_after AS purgeAfter, created_by AS createdBy, created_at AS createdAt, updated_by AS updatedBy, updated_at AS updatedAt FROM secrets FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((s) => ({ ...s, tags: s.tags ? JSON.parse(s.tags) : [], valueEnc: JSON.parse(s.valueEnc), dekEnc: JSON.parse(s.dekEnc), notesEnc: s.notesEnc ? JSON.parse(s.notesEnc) : null, isDeleted: !!s.isDeleted }));
 
-    this.secretVersions = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, secret_id AS secretId, version_num AS versionNum, value_enc AS valueEnc, dek_enc AS dekEnc, changed_by AS changedBy, changed_at AS changedAt FROM secret_versions FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.secretVersions = (await this.runJsonQuery("SET NOCOUNT ON; SELECT id, secret_id AS secretId, version_num AS versionNum, value_enc AS valueEnc, dek_enc AS dekEnc, changed_by AS changedBy, changed_at AS changedAt FROM secret_versions FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((v) => ({ ...v, valueEnc: JSON.parse(v.valueEnc), dekEnc: JSON.parse(v.dekEnc) }));
 
-    this.secretAcl = await this.runJsonQuery("SET NOCOUNT ON; SELECT secret_id AS secretId, role_id AS roleId, can_add AS canAdd, can_view AS canView, can_change AS canChange, can_delete AS canDelete FROM secret_acl FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.secretAcl = (await this.runJsonQuery("SET NOCOUNT ON; SELECT secret_id AS secretId, role_id AS roleId, can_add AS canAdd, can_view AS canView, can_change AS canChange, can_delete AS canDelete FROM secret_acl FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((x) => ({ ...x, canAdd: !!x.canAdd, canView: !!x.canView, canChange: !!x.canChange, canDelete: !!x.canDelete }));
 
-    this.folderAcl = await this.runJsonQuery("SET NOCOUNT ON; SELECT folder_id AS folderId, role_id AS roleId, can_add AS canAdd, can_view AS canView, can_change AS canChange, can_delete AS canDelete FROM folder_acl FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.folderAcl = (await this.runJsonQuery("SET NOCOUNT ON; SELECT folder_id AS folderId, role_id AS roleId, can_add AS canAdd, can_view AS canView, can_change AS canChange, can_delete AS canDelete FROM folder_acl FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((x) => ({ ...x, canAdd: !!x.canAdd, canView: !!x.canView, canChange: !!x.canChange, canDelete: !!x.canDelete }));
 
-    this.apiTokens = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, user_id AS userId, name, scopes, token_hash AS tokenHash, last_used AS lastUsed, expires_at AS expiresAt, created_at AS createdAt FROM api_tokens FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.apiTokens = (await this.runJsonQuery("SET NOCOUNT ON; SELECT id, user_id AS userId, name, scopes, token_hash AS tokenHash, last_used AS lastUsed, expires_at AS expiresAt, created_at AS createdAt FROM api_tokens FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((t) => ({ ...t, scopes: t.scopes ? JSON.parse(t.scopes) : ['read'] }));
 
-    this.auditLog = await this.runJsonQuery("SET NOCOUNT ON; SELECT id, event_time AS eventTime, user_id AS userId, username, action, resource, resource_id AS resourceId, secret_name AS secretName, ip_address AS ipAddress, user_agent AS userAgent, detail FROM audit_log ORDER BY id FOR JSON PATH, INCLUDE_NULL_VALUES;")
+    this.auditLog = (await this.runJsonQuery("SET NOCOUNT ON; SELECT id, event_time AS eventTime, user_id AS userId, username, action, resource, resource_id AS resourceId, secret_name AS secretName, ip_address AS ipAddress, user_agent AS userAgent, detail FROM audit_log ORDER BY id FOR JSON PATH, INCLUDE_NULL_VALUES;"))
       .map((a) => ({ ...a, detail: a.detail ? JSON.parse(a.detail) : null }));
 
     this.refreshSessions = await this.runJsonQuery("SET NOCOUNT ON; SELECT jti, parent_jti AS parentJti, user_id AS userId, token_hash AS tokenHash, expires_at AS expiresAt, created_at AS createdAt, revoked_at AS revokedAt, last_used_at AS lastUsedAt FROM refresh_sessions FOR JSON PATH, INCLUDE_NULL_VALUES;");
