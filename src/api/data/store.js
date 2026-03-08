@@ -40,6 +40,8 @@ function sanitizeDetail(detail) {
 
 const MAX_REFRESH_SESSIONS = 200000;
 const MAX_REVOKED_JTI = 200000;
+// TOTP validity window: skew=1 means -1/0/+1 step × 30 s = 90 s total.
+const TOTP_WINDOW_MS = 90000;
 
 export class Store {
   constructor() {
@@ -57,6 +59,12 @@ export class Store {
     this.refreshSessions = [];
     this.revokedTokenJti = [];
     this.auditSequence = 0;
+
+    // Ephemeral map of recently consumed TOTP codes. Prevents a valid code from
+    // being replayed within the 90-second validity window. Not included in
+    // snapshot/restore — worst case a code could be replayed across a restart
+    // within one step window, an acceptable trade-off.
+    this._usedTotpCodes = new Map(); // `${userId}:${code}` → expiresAtMs
   }
 
   snapshot() {
@@ -243,17 +251,29 @@ export class Store {
     const now = Date.now();
     const minTime = now - Math.max(1, retentionDays) * 24 * 60 * 60 * 1000;
 
-    this.auditLog = this.auditLog.filter((record) => {
+    const kept = [];
+    const purged = [];
+    for (const record of this.auditLog) {
       const ts = new Date(record.eventTime).getTime();
-      return Number.isFinite(ts) && ts >= minTime;
-    });
+      if (Number.isFinite(ts) && ts >= minTime) {
+        kept.push(record);
+      } else {
+        purged.push(record);
+      }
+    }
+    this.auditLog = kept;
 
     if (this.auditLog.length > maxEntries) {
+      const excess = this.auditLog.slice(0, this.auditLog.length - maxEntries);
+      purged.push(...excess);
       this.auditLog = this.auditLog.slice(this.auditLog.length - maxEntries);
     }
 
     this.rechainAuditLog();
     this.auditSequence = this.auditLog.length > 0 ? Math.max(...this.auditLog.map((a) => Number(a.id) || 0)) : 0;
+
+    // Return purged records so callers can archive them before they are lost.
+    return purged;
   }
 
   enforceSessionRetention() {
@@ -318,6 +338,24 @@ export class Store {
     // are naturally expired on restart and do not need this fallback.
     const session = this.refreshSessions.find((s) => s.jti === jti);
     return session ? !!session.revokedAt : false;
+  }
+
+  isTotpCodeUsed(userId, code) {
+    const key = `${userId}:${code}`;
+    const expiresAt = this._usedTotpCodes.get(key);
+    return expiresAt !== undefined && expiresAt > Date.now();
+  }
+
+  markTotpCodeUsed(userId, code) {
+    const key = `${userId}:${code}`;
+    this._usedTotpCodes.set(key, Date.now() + TOTP_WINDOW_MS);
+    // Sweep expired entries to bound memory usage.
+    const now = Date.now();
+    for (const [k, expiresAt] of this._usedTotpCodes) {
+      if (expiresAt <= now) {
+        this._usedTotpCodes.delete(k);
+      }
+    }
   }
 
   findApiTokenByHash(tokenHash) {

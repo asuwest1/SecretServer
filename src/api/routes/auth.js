@@ -181,6 +181,16 @@ export function registerAuthRoutes(router) {
       return;
     }
 
+    // Pre-flight lockout check: look up the account before attempting any auth
+    // (LDAP or local) so that lockout cannot be bypassed by routing attempts
+    // through the LDAP path.
+    const usernameLookup = normalizeForLookup(usernameText);
+    const knownUser = ctx.store.users.find((u) => normalizeForLookup(u.username) === usernameLookup && u.isActive);
+    if (knownUser && isLocked(knownUser)) {
+      sendError(res, 401, 'UNAUTHENTICATED', 'Invalid credentials.', ctx.traceId);
+      return;
+    }
+
     let user = null;
 
     if (ctx.config.ldap.enabled) {
@@ -189,6 +199,22 @@ export function registerAuthRoutes(router) {
         user = ensureLocalUserForLdap(ctx.store, ldapResult);
         syncLdapGroupsToRoles(ctx.store, user.id, ldapResult.groups, ctx.config.ldap, ctx.logger);
       } else if (!isLdapFallbackAllowed(ctx.config)) {
+        // Apply lockout to the known account so LDAP-only users are protected
+        // by the same brute-force policy as local users.
+        if (knownUser) {
+          knownUser.failedAttempts += 1;
+          if (knownUser.failedAttempts >= ctx.config.lockoutThreshold) {
+            knownUser.lockedUntil = new Date(Date.now() + ctx.config.lockoutDurationMinutes * 60000).toISOString();
+          }
+          ctx.store.appendAudit({
+            userId: knownUser.id,
+            username: knownUser.username,
+            action: 'AUTH_LOGIN_FAILURE',
+            resource: 'user',
+            resourceId: knownUser.id,
+            ipAddress: req.socket.remoteAddress,
+          });
+        }
         ctx.logger.warn('ldap_auth_rejected_no_fallback', { reason: ldapResult.reason });
         sendError(res, 401, 'UNAUTHENTICATED', 'LDAP authentication failed.', ctx.traceId);
         return;
@@ -196,9 +222,10 @@ export function registerAuthRoutes(router) {
     }
 
     if (!user) {
-      const usernameLookup = normalizeForLookup(usernameText);
-      user = ctx.store.users.find((u) => normalizeForLookup(u.username) === usernameLookup && u.isActive);
-      if (!user || isLocked(user)) {
+      // Local auth path (LDAP disabled, or LDAP failed with fallback allowed).
+      // Reuse the pre-flight lookup; isLocked was already verified above.
+      user = knownUser;
+      if (!user) {
         sendError(res, 401, 'UNAUTHENTICATED', 'Invalid credentials.', ctx.traceId);
         return;
       }
@@ -291,6 +318,13 @@ export function registerAuthRoutes(router) {
       sendError(res, 401, 'UNAUTHENTICATED', 'Invalid MFA code.', ctx.traceId);
       return;
     }
+
+    // Prevent replay of a valid TOTP code within its 90-second validity window.
+    if (ctx.store.isTotpCodeUsed(user.id, code)) {
+      sendError(res, 401, 'UNAUTHENTICATED', 'Invalid MFA code.', ctx.traceId);
+      return;
+    }
+    ctx.store.markTotpCodeUsed(user.id, code);
 
     ctx.store.revokeSession(claims.jti);
     const tokens = issueSessionTokens(ctx, user);

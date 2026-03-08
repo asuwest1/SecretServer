@@ -6,7 +6,10 @@ on:
     - cron: '0 12 * * 1'
 
 jobs:
-  npm-audit:
+  npm-audit-web:
+    # The API server uses only Node.js built-ins (no npm dependencies).
+    # The React frontend in src/web/ carries third-party dependencies and
+    # must be audited separately.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,8 +17,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
-      - run: npm audit --audit-level=high
+          cache-dependency-path: src/web/package-lock.json
+      - name: Install web dependencies
+        run: npm --prefix src/web ci
+      - name: Audit web dependencies
+        run: npm --prefix src/web audit --audit-level=high
 
   integration-security:
     runs-on: ubuntu-latest

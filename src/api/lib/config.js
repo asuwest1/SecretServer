@@ -104,6 +104,10 @@ export function loadConfig() {
     audit: {
       retentionDays: int('SECRET_SERVER_AUDIT_RETENTION_DAYS', 90),
       maxEntries: int('SECRET_SERVER_AUDIT_MAX_ENTRIES', 200000),
+      // When set, records purged by the retention policy are written to JSONL
+      // files in this directory before being discarded. Each purge run produces
+      // one file named audit-<ISO-timestamp>.jsonl. Leave empty to disable.
+      archiveDir: env('SECRET_SERVER_AUDIT_ARCHIVE_DIR', ''),
     },
     openApi: {
       internalOnly: bool('SECRET_SERVER_OPENAPI_INTERNAL_ONLY', true),

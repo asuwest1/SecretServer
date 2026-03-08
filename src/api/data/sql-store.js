@@ -196,12 +196,23 @@ export class SqlStore extends Store {
       args.push('-E');
     }
 
-    const env = { ...process.env };
+    // Build a minimal environment for the sqlcmd subprocess instead of
+    // forwarding the full server environment. This prevents SECRET_SERVER_*
+    // credentials (bootstrap password, master key path, LDAP password, etc.)
+    // from appearing in the child process's /proc/<pid>/environ on Linux or
+    // being readable via process inspection tools on Windows.
+    const SAFE_ENV_KEYS = ['PATH', 'HOME', 'USER', 'USERNAME', 'SYSTEMROOT', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'LC_CTYPE'];
+    const sqlEnv = {};
+    for (const key of SAFE_ENV_KEYS) {
+      if (process.env[key] !== undefined) {
+        sqlEnv[key] = process.env[key];
+      }
+    }
     if (this.sql.username && this.sql.password) {
-      env.SQLCMDPASSWORD = this.sql.password;
+      sqlEnv.SQLCMDPASSWORD = this.sql.password;
     }
 
-    const result = await runCommandAsync(this.sql.sqlcmdPath, args, { encoding: 'utf8', env, timeout: 120000 });
+    const result = await runCommandAsync(this.sql.sqlcmdPath, args, { encoding: 'utf8', env: sqlEnv, timeout: 120000 });
     if (result.status !== 0) {
       throw new Error(result.stderr || result.stdout || 'SQLCMD_FAILED');
     }

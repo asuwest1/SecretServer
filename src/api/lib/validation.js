@@ -44,7 +44,9 @@ export function validateEmail(value) {
   if (!validateLength(email, { min: 3, max: 254 })) {
     return { ok: false, error: 'Email must be between 3 and 254 characters.' };
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  // Require: something@something.tld where tld is 2+ non-whitespace, non-@ chars.
+  // Rejects single-char TLDs, consecutive @, and embedded whitespace.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     return { ok: false, error: 'Email format is invalid.' };
   }
   return { ok: true, value: email };
