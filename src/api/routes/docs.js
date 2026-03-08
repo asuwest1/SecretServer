@@ -29,18 +29,32 @@ function isInternalIp(ipAddress) {
   );
 }
 
-function getClientIp(req, trustProxy) {
-  if (!trustProxy) {
-    return normalizeIp(req.socket.remoteAddress || '');
+function isTrustedProxy(remoteIp, trustedProxyIps) {
+  const normalized = normalizeIp(remoteIp);
+  if (!normalized) return false;
+  if (trustedProxyIps.includes(normalized)) return true;
+  return isInternalIp(normalized);
+}
+
+function getClientIp(req, openApiConfig) {
+  const remoteIp = normalizeIp(req.socket.remoteAddress || '');
+  if (!openApiConfig.trustProxy) {
+    return remoteIp;
+  }
+
+  if (!isTrustedProxy(remoteIp, openApiConfig.trustedProxyIps || [])) {
+    return remoteIp;
   }
 
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.trim()) {
-    const first = forwarded.split(',')[0].trim();
-    return normalizeIp(first);
+    const chain = forwarded.split(',').map((x) => normalizeIp(x.trim())).filter(Boolean);
+    if (chain.length > 0) {
+      return chain[0];
+    }
   }
 
-  return normalizeIp(req.socket.remoteAddress || '');
+  return remoteIp;
 }
 
 export function registerDocsRoutes(router) {
@@ -48,7 +62,7 @@ export function registerDocsRoutes(router) {
     const actor = requireAuth(req, res, ctx, 'admin');
     if (!actor || !requireSuperAdmin(res, ctx, actor)) return;
 
-    const clientIp = getClientIp(req, ctx.config.openApi.trustProxy);
+    const clientIp = getClientIp(req, ctx.config.openApi);
     if (ctx.config.openApi.internalOnly && !isInternalIp(clientIp)) {
       sendError(res, 403, 'PERMISSION_DENIED', 'OpenAPI docs are restricted to internal networks.', ctx.traceId);
       return;
@@ -59,4 +73,3 @@ export function registerDocsRoutes(router) {
     text(res, 200, content, 'application/yaml; charset=utf-8');
   });
 }
-

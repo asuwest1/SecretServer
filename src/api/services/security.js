@@ -3,6 +3,7 @@ import { sendError } from '../lib/http.js';
 
 const buckets = new Map();
 let lastSweepMinute = -1;
+const MAX_BUCKETS = 50000;
 
 function sweepBuckets(currentMinute) {
   for (const [key, entry] of buckets.entries()) {
@@ -11,6 +12,13 @@ function sweepBuckets(currentMinute) {
     }
   }
   lastSweepMinute = currentMinute;
+}
+
+function evictOldestBucket() {
+  const first = buckets.keys().next();
+  if (!first.done) {
+    buckets.delete(first.value);
+  }
 }
 
 function hasScope(scopes, requiredScope) {
@@ -27,6 +35,13 @@ export function allowRateLimit(key, limitPerMinute, nowMs = Date.now()) {
   const minute = Math.floor(nowMs / 60000);
   if (lastSweepMinute !== minute || buckets.size > 10000) {
     sweepBuckets(minute);
+  }
+
+  if (!buckets.has(key) && buckets.size >= MAX_BUCKETS) {
+    sweepBuckets(minute);
+    while (buckets.size >= MAX_BUCKETS) {
+      evictOldestBucket();
+    }
   }
 
   const existing = buckets.get(key);

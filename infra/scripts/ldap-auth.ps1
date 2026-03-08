@@ -17,14 +17,7 @@ try {
   $server = [string]$input.server
   $baseDn = [string]$input.baseDn
   $serviceAccountDn = [string]$input.serviceAccountDn
-  $serviceAccountPasswordEnv = [string]$input.serviceAccountPasswordEnv
-  $serviceAccountPassword = ''
-  if (-not [string]::IsNullOrWhiteSpace($serviceAccountPasswordEnv)) {
-    $servicePasswordVar = Get-Item -Path "Env:$serviceAccountPasswordEnv" -ErrorAction SilentlyContinue
-    if ($null -ne $servicePasswordVar) {
-      $serviceAccountPassword = [string]$servicePasswordVar.Value
-    }
-  }
+  $serviceAccountPassword = [string]$input.serviceAccountPassword
   $port = [int]$input.port
   $requireLdaps = [bool]$input.requireLdaps
 

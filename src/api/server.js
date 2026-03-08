@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
 import { Router } from './lib/router.js';
 import { notFound, sendError } from './lib/http.js';
@@ -91,9 +92,27 @@ function applyCorsHeaders(req, res, appConfig) {
   if (!allowedOrigin) return false;
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-CSRF-Token');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'X-CSRF-Token');
   return true;
+}
+
+function isStateChangingMethod(method) {
+  return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
+}
+
+function hasAuthCredential(req) {
+  return Boolean(req.headers.authorization || req.headers['x-api-token']);
+}
+
+function equalsSecure(a, b) {
+  const left = Buffer.from(String(a || ''), 'utf8');
+  const right = Buffer.from(String(b || ''), 'utf8');
+  if (left.length === 0 || right.length === 0 || left.length !== right.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -104,6 +123,9 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none';");
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  if (config.csrf?.enabled && config.csrf?.token) {
+    res.setHeader('X-CSRF-Token', config.csrf.token);
+  }
 
   if (req.method === 'OPTIONS') {
     const allowed = applyCorsHeaders(req, res, config);
@@ -120,6 +142,14 @@ const server = http.createServer(async (req, res) => {
     const allowed = applyCorsHeaders(req, res, config);
     if (!allowed) {
       sendError(res, 403, 'PERMISSION_DENIED', 'Origin is not allowed.', 'cors');
+      return;
+    }
+  }
+
+  if (config.csrf?.enabled && req.headers.origin && isStateChangingMethod(req.method || 'GET') && hasAuthCredential(req)) {
+    const supplied = req.headers['x-csrf-token'];
+    if (!equalsSecure(supplied, config.csrf.token)) {
+      sendError(res, 403, 'PERMISSION_DENIED', 'CSRF token validation failed.', 'csrf');
       return;
     }
   }
@@ -174,4 +204,3 @@ server.listen(config.port, config.host, () => {
     env: config.env,
   });
 });
-

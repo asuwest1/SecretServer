@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 
 function env(name, fallback = '') {
@@ -32,9 +33,14 @@ function csvList(name, fallback = []) {
   return raw.split(',').map((x) => x.trim()).filter((x) => x.length > 0);
 }
 
+function deriveCsrfToken(seed) {
+  return crypto.createHash('sha256').update(String(seed || '')).digest('hex').slice(0, 32);
+}
+
 export function loadConfig() {
   const keyFilePath = env('SECRET_SERVER_KEY_FILE', './secrets/master.key');
   const jwtSigningKeyPath = env('SECRET_SERVER_JWT_KEY_FILE', './secrets/jwt.key');
+  const csrfSeed = env('SECRET_SERVER_CSRF_SECRET', env('SECRET_SERVER_ISSUER', 'SecretServer'));
 
   return {
     env: env('NODE_ENV', 'development'),
@@ -43,6 +49,12 @@ export function loadConfig() {
     issuer: env('SECRET_SERVER_ISSUER', 'SecretServer'),
     accessTokenLifetimeMinutes: int('SECRET_SERVER_ACCESS_TOKEN_LIFETIME_MINUTES', 15),
     refreshTokenLifetimeHours: int('SECRET_SERVER_REFRESH_TOKEN_LIFETIME_HOURS', 8),
+    maxApiTokensPerUser: int('SECRET_SERVER_MAX_API_TOKENS_PER_USER', 20),
+    maxApiTokenLifetimeDays: int('SECRET_SERVER_MAX_API_TOKEN_LIFETIME_DAYS', 30),
+    csrf: {
+      enabled: bool('SECRET_SERVER_CSRF_ENABLED', true),
+      token: env('SECRET_SERVER_CSRF_TOKEN', deriveCsrfToken(csrfSeed)),
+    },
     cors: {
       allowedOrigins: csvList('SECRET_SERVER_CORS_ALLOWED_ORIGINS', []),
     },
@@ -69,6 +81,7 @@ export function loadConfig() {
       serviceAccountDn: env('SECRET_SERVER_LDAP_SERVICE_ACCOUNT_DN', ''),
       serviceAccountPassword: env(env('SECRET_SERVER_LDAP_PASSWORD_ENV', 'SECRET_SERVER_LDAP_PASSWORD'), ''),
       authScriptPath: env('SECRET_SERVER_LDAP_AUTH_SCRIPT', './infra/scripts/ldap-auth.ps1'),
+      authScriptSha256: env('SECRET_SERVER_LDAP_AUTH_SCRIPT_SHA256', '').toLowerCase(),
       authTimeoutMs: int('SECRET_SERVER_LDAP_AUTH_TIMEOUT_MS', 8000),
       maxGroups: int('SECRET_SERVER_LDAP_MAX_GROUPS', 256),
       requireLdaps: bool('SECRET_SERVER_LDAP_REQUIRE_LDAPS', true),
@@ -93,8 +106,9 @@ export function loadConfig() {
     },
     openApi: {
       internalOnly: bool('SECRET_SERVER_OPENAPI_INTERNAL_ONLY', true),
+      trustProxy: bool('SECRET_SERVER_OPENAPI_TRUST_PROXY', true),
+      trustedProxyIps: csvList('SECRET_SERVER_OPENAPI_TRUSTED_PROXY_IPS', []),
     },
     fileExists: (filePath) => fs.existsSync(filePath),
   };
 }
-

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
@@ -17,6 +18,11 @@ function normalizeGroups(groups, maxGroups) {
     }
   }
   return [...deduped];
+}
+
+function sha256File(filePath) {
+  const content = fs.readFileSync(filePath);
+  return crypto.createHash('sha256').update(content).digest('hex').toLowerCase();
 }
 
 function runProcessAsync(command, args, options = {}) {
@@ -72,6 +78,40 @@ function runProcessAsync(command, args, options = {}) {
   });
 }
 
+function parseLdapOutput(stdout, safeUsername, maxGroups) {
+  const raw = String(stdout || '').trim();
+  const parsed = JSON.parse(raw || '{}');
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, reason: 'LDAP_PARSE_FAILED' };
+  }
+
+  if (typeof parsed.ok !== 'boolean') {
+    return { ok: false, reason: 'LDAP_PARSE_FAILED' };
+  }
+
+  if (!parsed.ok) {
+    return { ok: false, reason: String(parsed.reason || 'LDAP_AUTH_FAILED') };
+  }
+
+  const username = normalizeUsername(parsed.username || safeUsername);
+  const displayName = String(parsed.displayName || safeUsername).trim().slice(0, 256);
+  const email = String(parsed.email || '').trim().slice(0, 254);
+  const groups = normalizeGroups(parsed.groups, Math.max(1, maxGroups || 256));
+
+  if (!username) {
+    return { ok: false, reason: 'LDAP_PARSE_FAILED' };
+  }
+
+  return {
+    ok: true,
+    username,
+    displayName,
+    email,
+    groups,
+  };
+}
+
 export class LdapService {
   constructor(config, logger, runner = null) {
     this.config = config;
@@ -94,6 +134,13 @@ export class LdapService {
 
     if (!this.config.authScriptPath || !fs.existsSync(this.config.authScriptPath)) {
       return { ok: false, reason: 'LDAP_AUTH_SCRIPT_MISSING' };
+    }
+
+    if (this.config.authScriptSha256) {
+      const actual = sha256File(this.config.authScriptPath);
+      if (actual !== this.config.authScriptSha256) {
+        return { ok: false, reason: 'LDAP_AUTH_SCRIPT_HASH_MISMATCH' };
+      }
     }
 
     return { ok: true };
@@ -122,7 +169,6 @@ export class LdapService {
       return { ok: false, reason: 'INVALID_CREDENTIALS' };
     }
 
-    const serviceAccountPasswordEnv = 'SECRET_SERVER_LDAP_BIND_PASSWORD';
     const payload = JSON.stringify({
       username: safeUsername,
       password,
@@ -131,21 +177,16 @@ export class LdapService {
       port: this.config.port,
       baseDn: this.config.baseDn,
       serviceAccountDn: this.config.serviceAccountDn,
-      serviceAccountPasswordEnv,
+      serviceAccountPassword: this.config.serviceAccountPassword || '',
       requireLdaps: this.config.requireLdaps,
     });
-
-    const env = { ...process.env };
-    if (this.config.serviceAccountPassword) {
-      env[serviceAccountPasswordEnv] = this.config.serviceAccountPassword;
-    }
 
     const result = await this.execute('powershell', ['-NoProfile', '-File', this.config.authScriptPath], {
       encoding: 'utf8',
       timeout: Math.max(1000, this.config.authTimeoutMs || 8000),
       windowsHide: true,
       input: payload,
-      env,
+      env: { ...process.env },
     });
 
     if (result.error) {
@@ -162,17 +203,7 @@ export class LdapService {
     }
 
     try {
-      const parsed = JSON.parse(String(result.stdout || '').trim() || '{}');
-      if (parsed.ok) {
-        return {
-          ok: true,
-          username: normalizeUsername(parsed.username || safeUsername),
-          displayName: String(parsed.displayName || safeUsername).trim(),
-          email: String(parsed.email || '').trim(),
-          groups: normalizeGroups(parsed.groups, Math.max(1, this.config.maxGroups || 256)),
-        };
-      }
-      return { ok: false, reason: parsed.reason || 'LDAP_AUTH_FAILED' };
+      return parseLdapOutput(result.stdout, safeUsername, this.config.maxGroups);
     } catch (err) {
       this.logger.warn('ldap_auth_failed_parse', { error: err.message });
       return { ok: false, reason: 'LDAP_PARSE_FAILED' };

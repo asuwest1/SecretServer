@@ -2,6 +2,37 @@ import crypto from 'node:crypto';
 import { json, readJson, sendError } from '../lib/http.js';
 import { requireAuth, requireSuperAdmin } from '../services/security.js';
 
+const MAX_FOLDER_DEPTH = 32;
+
+function computeFolderDepth(store, parentFolderId) {
+  if (!parentFolderId) return { ok: true, depth: 1 };
+
+  let depth = 1;
+  const seen = new Set();
+  let cursor = parentFolderId;
+
+  while (cursor) {
+    if (seen.has(cursor)) {
+      return { ok: false, error: 'Folder hierarchy cycle detected.' };
+    }
+    seen.add(cursor);
+
+    const parent = store.folders.find((f) => f.id === cursor);
+    if (!parent) {
+      return { ok: false, error: 'Parent folder not found.' };
+    }
+
+    depth += 1;
+    if (depth > MAX_FOLDER_DEPTH) {
+      return { ok: false, error: `Folder depth exceeds maximum of ${MAX_FOLDER_DEPTH}.` };
+    }
+
+    cursor = parent.parentFolderId || null;
+  }
+
+  return { ok: true, depth };
+}
+
 export function registerFolderRoutes(router) {
   router.register('GET', /^\/api\/v1\/folders$/, async (req, res, ctx) => {
     const actor = requireAuth(req, res, ctx, 'read');
@@ -29,10 +60,17 @@ export function registerFolderRoutes(router) {
       return;
     }
 
+    const parentFolderId = body.parentFolderId || null;
+    const depthCheck = computeFolderDepth(ctx.store, parentFolderId);
+    if (!depthCheck.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', depthCheck.error, ctx.traceId);
+      return;
+    }
+
     const folder = {
       id: crypto.randomUUID(),
       name: body.name,
-      parentFolderId: body.parentFolderId || null,
+      parentFolderId,
       createdBy: actor.id,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

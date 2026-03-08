@@ -388,9 +388,11 @@ export default function App() {
         return;
       }
 
+      const csrfToken = localStorage.getItem('ss_csrf_token') || '';
       const response = await fetch('/api/v1/audit/export?format=csv', {
         headers: {
           Authorization: `Bearer ${token}`,
+          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
         },
       });
       if (!response.ok) {
@@ -745,9 +747,4 @@ export default function App() {
     </div>
   );
 }
-
-
-
-
-
 

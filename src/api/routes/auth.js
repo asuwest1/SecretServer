@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { json, readJson, sendError } from '../lib/http.js';
-import { hashPassword, verifyPassword } from '../lib/password.js';
+import { hashPassword, needsPasswordRehash, verifyPassword } from '../lib/password.js';
 import { verifyTotp } from '../lib/totp.js';
 import { normalizeForLookup, validatePassword } from '../lib/validation.js';
 import { allowRateLimit, hashToken, requireAuth, requireSuperAdmin } from '../services/security.js';
@@ -225,6 +225,10 @@ export function registerAuthRoutes(router) {
         sendError(res, 401, 'UNAUTHENTICATED', 'Invalid credentials.', ctx.traceId);
         return;
       }
+      if (needsPasswordRehash(user.passwordHash)) {
+        user.passwordHash = await hashPassword(passwordText);
+        user.updatedAt = new Date().toISOString();
+      }
     }
 
     user.failedAttempts = 0;
@@ -397,6 +401,7 @@ export function registerAuthRoutes(router) {
     json(res, 201, { data: { created: true } });
   });
 }
+
 
 
 

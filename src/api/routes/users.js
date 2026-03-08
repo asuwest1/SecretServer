@@ -24,6 +24,30 @@ function normalizeScopes(input) {
   return deduped.length > 0 ? deduped : ['read'];
 }
 
+function resolveTokenExpiry(expiresAtInput, maxLifetimeDays) {
+  const now = Date.now();
+  const maxLifetimeMs = Math.max(1, Number(maxLifetimeDays || 30)) * 24 * 60 * 60 * 1000;
+  const maxAllowed = now + maxLifetimeMs;
+
+  if (expiresAtInput === null || expiresAtInput === undefined || String(expiresAtInput).trim() === '') {
+    return { ok: true, value: new Date(maxAllowed).toISOString() };
+  }
+
+  const parsed = new Date(String(expiresAtInput));
+  const ts = parsed.getTime();
+  if (!Number.isFinite(ts)) {
+    return { ok: false, error: 'Token expiration is invalid.' };
+  }
+  if (ts <= now) {
+    return { ok: false, error: 'Token expiration must be in the future.' };
+  }
+  if (ts > maxAllowed) {
+    return { ok: false, error: `Token expiration cannot exceed ${Math.max(1, Number(maxLifetimeDays || 30))} days.` };
+  }
+
+  return { ok: true, value: parsed.toISOString() };
+}
+
 export function registerUserRoutes(router) {
   router.register('GET', /^\/api\/v1\/users$/, async (req, res, ctx) => {
     const user = requireAuth(req, res, ctx, 'admin');
@@ -124,15 +148,22 @@ export function registerUserRoutes(router) {
 
     const body = await readJson(req);
     const tokenName = String(body.name || 'default').trim().slice(0, 128) || 'default';
+    const scopes = normalizeScopes(body.scopes);
+    const expiryCheck = resolveTokenExpiry(body.expiresAt, ctx.config.maxApiTokenLifetimeDays);
+    if (!expiryCheck.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', expiryCheck.error, ctx.traceId);
+      return;
+    }
+
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenRecord = {
       id: crypto.randomUUID(),
       userId: ctx.params.id,
       name: tokenName,
-      scopes: normalizeScopes(body.scopes),
+      scopes,
       tokenHash: hashApiToken(rawToken),
       createdAt: new Date().toISOString(),
-      expiresAt: body.expiresAt || null,
+      expiresAt: expiryCheck.value,
       lastUsed: null,
     };
     ctx.store.apiTokens.push(tokenRecord);
@@ -143,10 +174,10 @@ export function registerUserRoutes(router) {
       action: 'API_TOKEN_CREATED',
       resource: 'token',
       resourceId: tokenRecord.id,
-      detail: { scopes: tokenRecord.scopes },
+      detail: { scopes: tokenRecord.scopes, expiresAt: tokenRecord.expiresAt },
     });
 
-    json(res, 201, { data: { tokenId: tokenRecord.id, rawToken, scopes: tokenRecord.scopes } });
+    json(res, 201, { data: { tokenId: tokenRecord.id, rawToken, scopes: tokenRecord.scopes, expiresAt: tokenRecord.expiresAt } });
   });
 
   router.register('POST', /^\/api\/v1\/users\/(?<id>[0-9a-f-]+)\/mfa\/setup$/, async (req, res, ctx) => {

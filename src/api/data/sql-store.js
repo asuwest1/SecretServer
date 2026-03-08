@@ -71,16 +71,28 @@ function diffRows(currentRows, persistedRows, keyFn) {
   return { upserts, deletes };
 }
 
+function assertIdentifier(value) {
+  const text = String(value || '');
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(text)) {
+    throw new Error(`SQL_IDENTIFIER_INVALID:${text}`);
+  }
+  return text;
+}
+
 function mergeSql({ table, keyColumns, allColumns, row }) {
-  const selectCols = allColumns.map((c) => `${c.value(row)} AS ${c.db}`).join(', ');
-  const onClause = keyColumns.map((k) => `target.${k} = source.${k}`).join(' AND ');
-  const updateCols = allColumns.filter((c) => !keyColumns.includes(c.db)).map((c) => `${c.db} = source.${c.db}`).join(', ');
-  const insertCols = allColumns.map((c) => c.db).join(', ');
-  const insertVals = allColumns.map((c) => `source.${c.db}`).join(', ');
+  const safeTable = assertIdentifier(table);
+  const safeKeyColumns = keyColumns.map((k) => assertIdentifier(k));
+  const safeAllColumns = allColumns.map((c) => ({ ...c, db: assertIdentifier(c.db) }));
+
+  const selectCols = safeAllColumns.map((c) => `${c.value(row)} AS ${c.db}`).join(', ');
+  const onClause = safeKeyColumns.map((k) => `target.${k} = source.${k}`).join(' AND ');
+  const updateCols = safeAllColumns.filter((c) => !safeKeyColumns.includes(c.db)).map((c) => `${c.db} = source.${c.db}`).join(', ');
+  const insertCols = safeAllColumns.map((c) => c.db).join(', ');
+  const insertVals = safeAllColumns.map((c) => `source.${c.db}`).join(', ');
 
   if (!updateCols) {
     return `
-MERGE ${table} AS target
+MERGE ${safeTable} AS target
 USING (SELECT ${selectCols}) AS source
 ON ${onClause}
 WHEN NOT MATCHED THEN
@@ -89,7 +101,7 @@ WHEN NOT MATCHED THEN
   }
 
   return `
-MERGE ${table} AS target
+MERGE ${safeTable} AS target
 USING (SELECT ${selectCols}) AS source
 ON ${onClause}
 WHEN MATCHED THEN
@@ -100,8 +112,10 @@ WHEN NOT MATCHED THEN
 }
 
 function deleteSql({ table, keyColumns, row, keyValueMap }) {
-  const where = keyColumns.map((k) => ` ${k} = ${keyValueMap(k, row)} `).join(' AND ');
-  return `DELETE FROM ${table} WHERE ${where};`;
+  const safeTable = assertIdentifier(table);
+  const safeKeyColumns = keyColumns.map((k) => assertIdentifier(k));
+  const where = safeKeyColumns.map((k) => ` ${k} = ${keyValueMap(k, row)} `).join(' AND ');
+  return `DELETE FROM ${safeTable} WHERE ${where};`;
 }
 
 function runCommandAsync(command, args, options = {}) {
@@ -497,5 +511,4 @@ COMMIT TRAN;
     }
   }
 }
-
 

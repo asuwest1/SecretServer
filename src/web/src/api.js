@@ -1,3 +1,28 @@
+let csrfToken = '';
+
+function loadCsrfToken() {
+  if (typeof localStorage === 'undefined') return '';
+  try {
+    return localStorage.getItem('ss_csrf_token') || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveCsrfToken(token) {
+  csrfToken = String(token || '').trim();
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (csrfToken) {
+      localStorage.setItem('ss_csrf_token', csrfToken);
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+csrfToken = loadCsrfToken();
+
 export function decodeJwtPayload(token) {
   try {
     const parts = String(token || '').split('.');
@@ -17,12 +42,20 @@ export async function apiRequest(path, { method = 'GET', token = '', body } = {}
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
+  if (csrfToken) {
+    headers['X-CSRF-Token'] = csrfToken;
+  }
 
   const response = await fetch(path, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+
+  const csrfHeader = response.headers.get('x-csrf-token');
+  if (csrfHeader) {
+    saveCsrfToken(csrfHeader);
+  }
 
   let payload = null;
   try {
