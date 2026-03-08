@@ -1,6 +1,15 @@
 import crypto from 'node:crypto';
 import { sendError } from '../lib/http.js';
 
+// OPERATIONAL NOTE — single-instance rate limiting
+// Rate limit state is stored in this process's memory. In a multi-instance or
+// load-balanced deployment each node maintains its own independent counters,
+// so the effective limit per IP is (limit × number of instances). For
+// production deployments with more than one node, replace this in-process
+// store with a shared Redis counter (INCR + EXPIRE) to enforce limits
+// cluster-wide. The LRU eviction at MAX_BUCKETS also means that under extreme
+// traffic (>50,000 unique source IPs per minute) the oldest entries are
+// silently dropped, briefly resetting their counters.
 const buckets = new Map();
 let lastSweepMinute = -1;
 const MAX_BUCKETS = 50000;

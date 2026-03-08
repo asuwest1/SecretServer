@@ -8,6 +8,7 @@ import { loadConfig } from './lib/config.js';
 import { CryptoService } from './lib/crypto.js';
 import { TokenService } from './lib/auth.js';
 import { hashPassword } from './lib/password.js';
+import { validatePassword } from './lib/validation.js';
 import { createStore } from './data/factory.js';
 import { SyslogService } from './services/syslog.js';
 import { LdapService } from './services/ldap.js';
@@ -44,6 +45,18 @@ if (config.ldap.enabled) {
     logger.error('ldap_config_invalid', { reason: 'LDAP_LOCAL_FALLBACK_DISABLED_IN_PRODUCTION' });
     process.exit(1);
   }
+
+  // In production, the LDAP auth script hash must be pinned. Without it, an
+  // attacker who can write to the script path could inject arbitrary code that
+  // runs with the server's privileges on every authentication attempt.
+  if (config.env === 'production' && !config.ldap.authScriptSha256) {
+    logger.error('ldap_config_invalid', {
+      reason: 'LDAP_AUTH_SCRIPT_HASH_REQUIRED_IN_PRODUCTION',
+      envVar: 'SECRET_SERVER_LDAP_AUTH_SCRIPT_SHA256',
+      message: 'Set SECRET_SERVER_LDAP_AUTH_SCRIPT_SHA256 to the SHA-256 hex digest of the LDAP auth script.',
+    });
+    process.exit(1);
+  }
 }
 
 if (store.users.length === 0) {
@@ -52,6 +65,16 @@ if (store.users.length === 0) {
     logger.error('bootstrap_password_missing', {
       envVar: 'SECRET_SERVER_BOOTSTRAP_PASSWORD',
       message: 'Set bootstrap password explicitly before first start.',
+    });
+    process.exit(1);
+  }
+
+  const bootstrapPasswordCheck = validatePassword(bootstrapPassword);
+  if (!bootstrapPasswordCheck.ok) {
+    logger.error('bootstrap_password_weak', {
+      envVar: 'SECRET_SERVER_BOOTSTRAP_PASSWORD',
+      reason: bootstrapPasswordCheck.error,
+      message: 'Bootstrap password does not meet strength requirements (12+ chars, upper, lower, number, symbol).',
     });
     process.exit(1);
   }
