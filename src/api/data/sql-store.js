@@ -17,8 +17,24 @@ function jsonLiteral(value) {
 function parseJsonOutput(raw) {
   const trimmed = (raw || '').trim();
   if (!trimmed) return [];
-  const lines = trimmed.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0);
-  const payload = lines.join('');
+
+  const firstArray = trimmed.indexOf('[');
+  const lastArray = trimmed.lastIndexOf(']');
+  let payload = '';
+
+  if (firstArray !== -1 && lastArray > firstArray) {
+    payload = trimmed.slice(firstArray, lastArray + 1);
+  } else {
+    const firstObject = trimmed.indexOf('{');
+    const lastObject = trimmed.lastIndexOf('}');
+    if (firstObject !== -1 && lastObject > firstObject) {
+      payload = trimmed.slice(firstObject, lastObject + 1);
+    } else {
+      const lines = trimmed.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0);
+      payload = lines.join('');
+    }
+  }
+
   try {
     return JSON.parse(payload || '[]');
   } catch {
@@ -168,9 +184,9 @@ export class SqlStore extends Store {
   }
 
   async runSql(query) {
-    // sqlcmd (notably on Linux mssql-tools18) rejects using -W together with -y/-Y.
-    // We keep -y/-Y for full-width output and omit -W for cross-platform compatibility.
-    const args = ['-S', this.sql.server, '-d', this.sql.database, '-h', '-1', '-y', '0', '-Y', '0', '-Q', query];
+    // Linux mssql-tools18 sqlcmd rejects combinations of -W/-h with -y 0.
+    // Keep -y/-Y and parse JSON payload robustly from output text.
+    const args = ['-S', this.sql.server, '-d', this.sql.database, '-y', '0', '-Y', '0', '-Q', query];
     if (this.sql.trustServerCertificate) {
       args.push('-C');
     }
@@ -513,5 +529,3 @@ COMMIT TRAN;
     }
   }
 }
-
-
