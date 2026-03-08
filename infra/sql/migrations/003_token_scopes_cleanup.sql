@@ -1,4 +1,4 @@
-﻿-- 003 token scopes and cleanup helpers
+-- 003 token scopes and cleanup helpers
 IF COL_LENGTH('api_tokens', 'scopes') IS NULL
 BEGIN
   ALTER TABLE api_tokens ADD scopes NVARCHAR(MAX) NOT NULL CONSTRAINT DF_api_tokens_scopes DEFAULT N'["read"]';
@@ -8,7 +8,7 @@ IF NOT EXISTS (
   SELECT 1 FROM sys.check_constraints WHERE name = 'CK_api_tokens_scopes_is_json'
 )
 BEGIN
-  ALTER TABLE api_tokens ADD CONSTRAINT CK_api_tokens_scopes_is_json CHECK (ISJSON(scopes) = 1);
+  EXEC(N'ALTER TABLE api_tokens ADD CONSTRAINT CK_api_tokens_scopes_is_json CHECK (ISJSON(scopes) = 1);');
 END;
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_api_tokens_expires_at' AND object_id = OBJECT_ID('api_tokens'))

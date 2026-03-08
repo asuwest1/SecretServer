@@ -1,4 +1,4 @@
-﻿CREATE TABLE users (
+CREATE TABLE users (
     id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
     username NVARCHAR(64) NOT NULL UNIQUE,
     display_name NVARCHAR(128) NOT NULL,
@@ -104,11 +104,13 @@ CREATE TABLE api_tokens (
     id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
     user_id UNIQUEIDENTIFIER NOT NULL,
     name NVARCHAR(64) NOT NULL,
+    scopes NVARCHAR(MAX) NOT NULL CONSTRAINT DF_api_tokens_scopes DEFAULT N'["read"]',
     token_hash NVARCHAR(256) NOT NULL UNIQUE,
     last_used DATETIME2 NULL,
     expires_at DATETIME2 NULL,
     created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT FK_api_tokens_user FOREIGN KEY (user_id) REFERENCES users(id)
+    CONSTRAINT FK_api_tokens_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT CK_api_tokens_scopes_is_json CHECK (ISJSON(scopes) = 1)
 );
 
 CREATE TABLE audit_log (
