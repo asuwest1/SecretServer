@@ -119,12 +119,17 @@ export class SqlStore extends Store {
       args.push('-C');
     }
     if (this.sql.username) {
-      args.push('-U', this.sql.username, '-P', this.sql.password);
+      args.push('-U', this.sql.username);
     } else {
       args.push('-E');
     }
 
-    const result = spawnSync(this.sql.sqlcmdPath, args, { encoding: 'utf8' });
+    const env = { ...process.env };
+    if (this.sql.username && this.sql.password) {
+      env.SQLCMDPASSWORD = this.sql.password;
+    }
+
+    const result = spawnSync(this.sql.sqlcmdPath, args, { encoding: 'utf8', env });
     if (result.status !== 0) {
       throw new Error(result.stderr || result.stdout || 'SQLCMD_FAILED');
     }
@@ -451,6 +456,7 @@ COMMIT TRAN;
     }
   }
 }
+
 
 
 

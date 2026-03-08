@@ -8,12 +8,17 @@ function sqlDependency(config) {
 
   const args = ['-S', config.sql.server, '-d', config.sql.database, '-h', '-1', '-W', '-Q', 'SELECT 1'];
   if (config.sql.username) {
-    args.push('-U', config.sql.username, '-P', config.sql.password);
+    args.push('-U', config.sql.username);
   } else {
     args.push('-E');
   }
 
-  const res = spawnSync(config.sql.sqlcmdPath, args, { encoding: 'utf8', timeout: 5000 });
+  const env = { ...process.env };
+  if (config.sql.username && config.sql.password) {
+    env.SQLCMDPASSWORD = config.sql.password;
+  }
+
+  const res = spawnSync(config.sql.sqlcmdPath, args, { encoding: 'utf8', timeout: 5000, env });
   return {
     enabled: true,
     status: res.status === 0 ? 'ok' : 'error',

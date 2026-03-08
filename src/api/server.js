@@ -46,7 +46,15 @@ if (config.ldap.enabled) {
 }
 
 if (store.users.length === 0) {
-  const bootstrapPassword = process.env.SECRET_SERVER_BOOTSTRAP_PASSWORD || 'ChangeMeNow!123';
+  const bootstrapPassword = String(process.env.SECRET_SERVER_BOOTSTRAP_PASSWORD || '').trim();
+  if (!bootstrapPassword) {
+    logger.error('bootstrap_password_missing', {
+      envVar: 'SECRET_SERVER_BOOTSTRAP_PASSWORD',
+      message: 'Set bootstrap password explicitly before first start.',
+    });
+    process.exit(1);
+  }
+
   hashPassword(bootstrapPassword)
     .then((passwordHash) => {
       store.seedSuperAdmin({ username: 'superadmin', passwordHash });

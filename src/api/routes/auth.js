@@ -264,7 +264,7 @@ export function registerAuthRoutes(router) {
       return;
     }
 
-    if (claims.type !== 'mfa') {
+    if (claims.type !== 'mfa' || ctx.store.isRevokedJti(claims.jti)) {
       sendError(res, 401, 'UNAUTHENTICATED', 'Invalid MFA token.', ctx.traceId);
       return;
     }
@@ -280,6 +280,7 @@ export function registerAuthRoutes(router) {
       return;
     }
 
+    ctx.store.revokeSession(claims.jti);
     const tokens = issueSessionTokens(ctx, user);
     ctx.store.appendAudit({
       userId: user.id,
@@ -378,3 +379,5 @@ export function registerAuthRoutes(router) {
     json(res, 201, { data: { created: true } });
   });
 }
+
+

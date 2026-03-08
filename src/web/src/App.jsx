@@ -73,7 +73,7 @@ export default function App() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [versionsLoading, setVersionsLoading] = useState(false);
 
-  const [loginForm, setLoginForm] = useState({ username: 'superadmin', password: 'ChangeMeNow!123' });
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
 
   const [folders, setFolders] = useState([]);
   const [secrets, setSecrets] = useState([]);
@@ -443,7 +443,7 @@ export default function App() {
                 </div>
                 <button className="primary" type="submit">Sign In</button>
               </form>
-              <p className="muted">Default bootstrap credentials are prefilled for local development only.</p>
+              <p className="muted">Enter your assigned credentials to sign in.</p>
             </div>
             {error ? <p className="error">{error}</p> : null}
           </section>
@@ -745,6 +745,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
