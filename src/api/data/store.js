@@ -309,7 +309,15 @@ export class Store {
   }
 
   isRevokedJti(jti) {
-    return this.revokedTokenJti.includes(jti);
+    if (this.revokedTokenJti.includes(jti)) {
+      return true;
+    }
+    // Secondary check via refreshSessions: catches revoked refresh tokens even when
+    // revokedTokenJti has been evicted (LRU cap) or was not yet persisted before a
+    // restart. MFA tokens have no session entry and are short-lived (5 min), so they
+    // are naturally expired on restart and do not need this fallback.
+    const session = this.refreshSessions.find((s) => s.jti === jti);
+    return session ? !!session.revokedAt : false;
   }
 
   findApiTokenByHash(tokenHash) {

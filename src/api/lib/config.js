@@ -33,14 +33,15 @@ function csvList(name, fallback = []) {
   return raw.split(',').map((x) => x.trim()).filter((x) => x.length > 0);
 }
 
-function deriveCsrfToken(seed) {
-  return crypto.createHash('sha256').update(String(seed || '')).digest('hex').slice(0, 32);
-}
-
 export function loadConfig() {
   const keyFilePath = env('SECRET_SERVER_KEY_FILE', './secrets/master.key');
   const jwtSigningKeyPath = env('SECRET_SERVER_JWT_KEY_FILE', './secrets/jwt.key');
-  const csrfSeed = env('SECRET_SERVER_CSRF_SECRET', env('SECRET_SERVER_ISSUER', 'SecretServer'));
+
+  // CSRF token: use explicitly configured value (required in multi-instance deployments
+  // where all nodes must share the same token) or generate a cryptographically random
+  // token at startup. The random fallback means each server restart issues a new token,
+  // which is correct — clients must re-fetch it via the X-CSRF-Token response header.
+  const csrfToken = env('SECRET_SERVER_CSRF_TOKEN', crypto.randomBytes(32).toString('hex'));
 
   return {
     env: env('NODE_ENV', 'development'),
@@ -53,7 +54,7 @@ export function loadConfig() {
     maxApiTokenLifetimeDays: int('SECRET_SERVER_MAX_API_TOKEN_LIFETIME_DAYS', 30),
     csrf: {
       enabled: bool('SECRET_SERVER_CSRF_ENABLED', true),
-      token: env('SECRET_SERVER_CSRF_TOKEN', deriveCsrfToken(csrfSeed)),
+      token: csrfToken,
     },
     cors: {
       allowedOrigins: csvList('SECRET_SERVER_CORS_ALLOWED_ORIGINS', []),
