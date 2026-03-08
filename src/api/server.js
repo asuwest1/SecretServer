@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import { Router } from './lib/router.js';
 import { notFound, sendError } from './lib/http.js';
 import { createLogger } from './lib/logger.js';
@@ -88,6 +90,28 @@ if (store.users.length === 0) {
       logger.error('bootstrap_failed', { error: err.message });
       process.exit(1);
     });
+}
+
+// SS-11: Remind operators to enable SQL Server TDE for audit log protection.
+if (config.sql.enabled) {
+  logger.warn('sql_tde_reminder', {
+    message: 'Enable SQL Server Transparent Data Encryption (TDE) on the secret_server database to protect audit logs and encrypted secret data at rest. See: https://learn.microsoft.com/en-us/sql/relational-databases/security/encryption/transparent-data-encryption',
+  });
+}
+
+// SS-10: Write purged audit records to a JSONL archive file before discarding them.
+function archiveAuditRecords(records, archiveDir, log) {
+  if (!records || records.length === 0) return;
+  try {
+    fs.mkdirSync(archiveDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/:/g, '-').replace(/\./g, '-');
+    const filePath = path.join(archiveDir, `audit-${ts}.jsonl`);
+    const content = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    fs.writeFileSync(filePath, content, { encoding: 'utf8', mode: 0o640 });
+    log.info('audit_archive_written', { path: filePath, count: records.length });
+  } catch (err) {
+    log.error('audit_archive_failed', { error: err.message, archiveDir });
+  }
 }
 
 const router = new Router();
@@ -200,7 +224,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (typeof store.enforceAuditRetention === 'function') {
-      store.enforceAuditRetention(config.audit);
+      const purged = store.enforceAuditRetention(config.audit);
+      if (config.audit.archiveDir) {
+        archiveAuditRecords(purged, config.audit.archiveDir, logger);
+      }
     }
 
     await store.flush();

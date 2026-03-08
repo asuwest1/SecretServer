@@ -74,4 +74,35 @@ export class CryptoService {
     const dek = this.unwrapDek(record.dekEnc);
     return this.decryptWithKey(record.valueEnc, dek);
   }
+
+  // Re-wrap a single DEK envelope under a different MEK without touching the
+  // underlying secret ciphertext. Used by the MEK rotation procedure.
+  rewrapDek(encDek, newMek) {
+    const dekBase64 = this.decryptWithKey(encDek, this.mek);
+    return this.encryptWithKey(dekBase64, newMek);
+  }
+
+  // Rotate the master encryption key across all DEK envelopes in the store.
+  // After this call this.mek is updated to newMek; callers must persist the
+  // store and write newMek to the key file before restarting the server.
+  //
+  // Only the DEK wrappers change — the secret ciphertext is untouched, making
+  // rotation fast regardless of the number of secrets.
+  rotateMek(newMek, store) {
+    for (const secret of store.secrets) {
+      secret.dekEnc = this.rewrapDek(secret.dekEnc, newMek);
+    }
+    for (const version of store.secretVersions) {
+      version.dekEnc = this.rewrapDek(version.dekEnc, newMek);
+    }
+    for (const user of store.users) {
+      if (user.mfaSecretEnc) {
+        user.mfaSecretEnc.dekEnc = this.rewrapDek(user.mfaSecretEnc.dekEnc, newMek);
+      }
+      if (user.mfaPendingSecretEnc) {
+        user.mfaPendingSecretEnc.dekEnc = this.rewrapDek(user.mfaPendingSecretEnc.dekEnc, newMek);
+      }
+    }
+    this.mek = newMek;
+  }
 }

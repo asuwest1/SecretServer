@@ -319,6 +319,13 @@ export function registerAuthRoutes(router) {
       return;
     }
 
+    // Prevent replay of a valid TOTP code within its 90-second validity window.
+    if (ctx.store.isTotpCodeUsed(user.id, code)) {
+      sendError(res, 401, 'UNAUTHENTICATED', 'Invalid MFA code.', ctx.traceId);
+      return;
+    }
+    ctx.store.markTotpCodeUsed(user.id, code);
+
     ctx.store.revokeSession(claims.jti);
     const tokens = issueSessionTokens(ctx, user);
     ctx.store.appendAudit({
